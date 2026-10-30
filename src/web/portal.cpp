@@ -27,7 +27,7 @@ bool secretsConfigured() {
 }
 
 bool hasCredentials() {
-  prefs.begin("wifi", true, "nvs");
+  prefs.begin("wifi", true);
   const bool nvs = prefs.getString("ssid", "").length() > 0;
   prefs.end();
   return nvs || secretsConfigured();
@@ -116,10 +116,12 @@ String htmlEscape(const String& s) {
 }
 
 bool connectWifi() {
-  prefs.begin("wifi", true, "nvs");
+  prefs.begin("wifi", true);
   const String ss = prefs.getString("ssid", "");
   const String pw = prefs.getString("pass", "");
-  const bool joinedBefore = prefs.getBool("joined", false);
+  // Treat secrets.h credentials as a known network so transient AP rejections
+  // retry (up to kMaxPasswordFailures) instead of dropping straight to portal.
+  const bool joinedBefore = prefs.getBool("joined", false) || (!ss.length() && secretsConfigured());
   prefs.end();
   const char* ssid = ss.length() ? ss.c_str() : WIFI_SSID;
   const char* pass = ss.length() ? pw.c_str() : WIFI_PASS;
@@ -142,7 +144,7 @@ bool connectWifi() {
     Serial.println();
     if (WiFi.status() == WL_CONNECTED) {
       if (!joinedBefore) {  // from now on a missing network is waited for, not set up again
-        prefs.begin("wifi", false, "nvs");
+        prefs.begin("wifi", false);
         prefs.putBool("joined", true);
         prefs.end();
       }
@@ -158,7 +160,7 @@ bool connectWifi() {
 }
 
 void forgetWifi() {
-  prefs.begin("wifi", false, "nvs");
+  prefs.begin("wifi", false);
   prefs.clear();
   prefs.end();
 }
@@ -222,7 +224,7 @@ String joinPage(const String& ssid, util::WifiSecurity sec, bool listed, const c
   // Shown when a saved network didn't join (wrong password, out of range).
   String lastSsid;
   if (hasCredentials()) {
-    prefs.begin("wifi", true, "nvs");
+    prefs.begin("wifi", true);
     lastSsid = prefs.getString("ssid", "");
     prefs.end();
     if (!lastSsid.length()) lastSsid = WIFI_SSID;
@@ -326,7 +328,7 @@ String joinPage(const String& ssid, util::WifiSecurity sec, bool listed, const c
       return;
     }
     if (sec == WifiSecurity::kOpen) pw = "";
-    prefs.begin("wifi", false, "nvs");
+    prefs.begin("wifi", false);
     prefs.putString("ssid", ss);
     prefs.putString("pass", pw);
     prefs.putBool("joined", false);  // new credentials: a failed join opens setup again

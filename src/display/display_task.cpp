@@ -568,7 +568,7 @@ static void displayTaskEntry(void* arg) {
 void spawnDisplayTask(const DisplayContext& ctx) {
   gCtx = ctx;
   xTaskCreatePinnedToCore(displayTaskEntry, "display", 12 * 1024,
-                          nullptr, 1, nullptr, 0 /*Core 0*/);
+                          nullptr, 1, nullptr, 1 /*Core 1: keeps QSPI off the web-task core*/);
 }
 
 }  // namespace display

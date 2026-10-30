@@ -9,7 +9,6 @@
 
 #include "platform/restart_info.h"
 #include "platform/watchdog.h"
-#include "util/send_deadline.h"
 #include "web/page.h"
 #include "web/portal.h"
 
@@ -24,8 +23,6 @@ constexpr const char* kCsrfHeader = "X-Requested-With";
 constexpr const char* kCsrfValue = "adblock";
 constexpr const char* kUploadTmp = "/upload.tmp";
 constexpr const char* kSessionCookie = "ab_session";
-constexpr size_t kPageSendPiece = 1436;  // one TCP segment
-constexpr uint32_t kPageSendBudgetMs = 20000;
 
 // Where the dashboard's "Check for updates" looks for update.json and the firmware
 // (published to GitHub Pages by release.yml: Pages sends CORS headers, release
@@ -113,27 +110,15 @@ bool parseBasicAuth(const String& header, String& user, String& pass) {
 
 }  // namespace
 
-// The page (46 KB, several TCP send buffers) goes out in pieces under one deadline: a
-// client reading a trickle at a time would otherwise hold the single web task for hours
-// (each byte sent resets NetworkClient's retry count). Normal clients take well under
-// a second; a cut-off page just reloads.
 void Dashboard::sendPage() {
   WebServer& s = *ctx_.server;
-  const size_t len = sizeof(kPage) - 1;
-  s.setContentLength(len);
-  s.send(200, "text/html", "");
-  const util::SendResult r =
-      util::sendWithDeadline(len, kPageSendPiece, kPageSendBudgetMs, *ctx_.clock, [&](size_t off, size_t n) {
-        s.sendContent_P(kPage + off, n);
-        if (ctx_.alive) ctx_.alive();
-        return s.client().connected();
-      });
-  if (!r.complete) {
-    ctx_.log->log(LogLevel::kWarn, kTag, "page send to %s cut off after %u of %u bytes (slow client)",
-                  s.client().remoteIP().toString().c_str(), static_cast<unsigned>(r.sent),
-                  static_cast<unsigned>(len));
-    s.client().stop();
-  }
+  if (ctx_.alive) ctx_.alive();
+  s.sendHeader("Content-Encoding", "gzip");
+  // send_P sends headers + body in one shot; NetworkClient::write() retries on
+  // backpressure (select+send, up to 10 s) so the full 16 KB goes through without
+  // the manual chunking that was causing early RST.
+  s.send_P(200, "text/html", reinterpret_cast<PGM_P>(kPageGz), kPageGzLen);
+  if (ctx_.alive) ctx_.alive();
 }
 
 void Dashboard::uploadProgress() {
