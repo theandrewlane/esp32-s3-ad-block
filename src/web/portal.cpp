@@ -27,7 +27,7 @@ bool secretsConfigured() {
 }
 
 bool hasCredentials() {
-  prefs.begin("wifi", true);
+  prefs.begin("wifi", true, "nvs");
   const bool nvs = prefs.getString("ssid", "").length() > 0;
   prefs.end();
   return nvs || secretsConfigured();
@@ -116,7 +116,7 @@ String htmlEscape(const String& s) {
 }
 
 bool connectWifi() {
-  prefs.begin("wifi", true);
+  prefs.begin("wifi", true, "nvs");
   const String ss = prefs.getString("ssid", "");
   const String pw = prefs.getString("pass", "");
   const bool joinedBefore = prefs.getBool("joined", false);
@@ -142,7 +142,7 @@ bool connectWifi() {
     Serial.println();
     if (WiFi.status() == WL_CONNECTED) {
       if (!joinedBefore) {  // from now on a missing network is waited for, not set up again
-        prefs.begin("wifi", false);
+        prefs.begin("wifi", false, "nvs");
         prefs.putBool("joined", true);
         prefs.end();
       }
@@ -158,7 +158,7 @@ bool connectWifi() {
 }
 
 void forgetWifi() {
-  prefs.begin("wifi", false);
+  prefs.begin("wifi", false, "nvs");
   prefs.clear();
   prefs.end();
 }
@@ -222,7 +222,7 @@ String joinPage(const String& ssid, util::WifiSecurity sec, bool listed, const c
   // Shown when a saved network didn't join (wrong password, out of range).
   String lastSsid;
   if (hasCredentials()) {
-    prefs.begin("wifi", true);
+    prefs.begin("wifi", true, "nvs");
     lastSsid = prefs.getString("ssid", "");
     prefs.end();
     if (!lastSsid.length()) lastSsid = WIFI_SSID;
@@ -326,7 +326,7 @@ String joinPage(const String& ssid, util::WifiSecurity sec, bool listed, const c
       return;
     }
     if (sec == WifiSecurity::kOpen) pw = "";
-    prefs.begin("wifi", false);
+    prefs.begin("wifi", false, "nvs");
     prefs.putString("ssid", ss);
     prefs.putString("pass", pw);
     prefs.putBool("joined", false);  // new credentials: a failed join opens setup again

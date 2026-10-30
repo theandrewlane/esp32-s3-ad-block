@@ -14,6 +14,7 @@ class NvsKvStore final : public hal::IKeyValueStore {
  public:
   explicit NvsKvStore(const char* ns) : ns_(ns) {}
 
+  // NVS recovery is handled in main.cpp::setup() before this is called.
   bool begin() { return prefs_.begin(ns_, false); }
 
   bool getString(const char* key, char* out, size_t outSize) const override {

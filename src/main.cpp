@@ -12,10 +12,12 @@
 #include <WiFi.h>
 #include <esp_netif.h>
 #include <esp_ota_ops.h>
+#include <esp_partition.h>
 #include <esp_rom_sys.h>
 #include <esp_sntp.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
+#include <nvs_flash.h>
 
 #include "app/app_policy.h"
 #include "app/blocklist_manager.h"
@@ -37,6 +39,8 @@
 #include "tasks/dns_service.h"
 #include "web/dashboard.h"
 #include "web/portal.h"
+#include "display/display_stats.h"
+#include "display/display_task.h"
 
 #ifndef FW_VERSION
 #define FW_VERSION "0.0.0-dev"
@@ -62,6 +66,7 @@ config::AppConfig gConfig;
 app::ClientTable gClients;
 app::BlocklistManager* gBlocklist = nullptr;
 app::AppPolicy* gPolicy = nullptr;
+display::DisplayStats gDisplayStats;
 app::DnsService* gDns = nullptr;
 auth::PasswordStore* gPasswords = nullptr;
 auth::LoginGuard gLogins(gClock);
@@ -319,9 +324,31 @@ extern "C" bool verifyRollbackLater() {
 // The maintenance task is Arduino's loopTask (core 1, prio 1): give it room for TLS.
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
+// NVS recovery called from setup() after Serial is up so log_e() is visible.
+// initArduino() calls nvs_flash_init() early (before the log channel is ready),
+// silently fails on some ZBIT flash chips (0x5E), and skips recovery for
+// unrecognised errors.  This catches whatever is left.
+static void ensureNvs() {
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_OK) return;
+  log_e("NVS init returned %d (%s) — erasing partition and reinitialising", err,
+        esp_err_to_name(err));
+  const esp_partition_t* part =
+      esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
+  if (part) {
+    esp_err_t e2 = esp_partition_erase_range(part, 0, part->size);
+    log_e("NVS partition erase: %d (%s)", e2, esp_err_to_name(e2));
+  } else {
+    log_e("NVS partition 'nvs' not found in table");
+  }
+  esp_err_t e3 = nvs_flash_init();
+  log_e("NVS reinit after erase: %d (%s)", e3, esp_err_to_name(e3));
+}
+
 void setup() {
   Serial.begin(115200);
   delay(300);
+  ensureNvs();
   Serial.printf("\n[adblock] v%s booting (%s, PSRAM %u KB)\n", FW_VERSION, kHostname,
                 static_cast<unsigned>(ESP.getPsramSize() / 1024));
   gRestart = platform::readRestartInfo();
@@ -359,7 +386,7 @@ void setup() {
   gBlocklist = new app::BlocklistManager(gFs, gHttp, gKv, gClock, gRandom, gLog, feedWatchdog);
   gBlocklist->begin();
   gClients.loadBans();
-  gPolicy = new app::AppPolicy(gClients, *gBlocklist);
+  gPolicy = new app::AppPolicy(gClients, *gBlocklist, &gDisplayStats);
 
   clearWifiIfBootHeld();
   if (!web::connectWifi()) web::runSetupPortal(gServer, kApPrefix, kHostname);  // reboots when done
@@ -396,6 +423,14 @@ void setup() {
   gServer.begin();
   startOta();
   xTaskCreatePinnedToCore(webTask, "web", 8192, nullptr, tskIDLE_PRIORITY, nullptr, 0);
+
+  display::DisplayContext dCtx;
+  dCtx.stats    = &gDisplayStats;
+  dCtx.dns      = gDns;
+  dCtx.clients  = &gClients;
+  dCtx.blocklist = gBlocklist;
+  display::spawnDisplayTask(dCtx);
+
   startLivenessChecks();
   gLog.log(hal::LogLevel::kInfo, "boot", "ready: DNS :53, dashboard http://%s.local", kHostname);
 }

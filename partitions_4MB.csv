@@ -1,0 +1,9 @@
+# 4 MB layout for ESP32-S3 JC4827W543C (N8R8: 8 MB PSRAM, 4 MB flash).
+# No OTA app slots: single factory partition keeps room for a ~2 MB LittleFS blocklist.
+# The factory subtype means the bootloader boots it unconditionally (no otadata needed).
+# The spiffs label is required by LittleFS.begin() — changing it wipes data.
+# Changing offsets wipes data and requires a USB flash.
+# Name,    Type, SubType,  Offset,   Size
+nvs,       data, nvs,      0x9000,   0x5000
+app0,      app,  factory,  0x10000,  0x1F0000
+spiffs,    data, spiffs,   0x200000, 0x200000
