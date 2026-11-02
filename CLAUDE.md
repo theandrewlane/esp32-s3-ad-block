@@ -102,7 +102,7 @@ native tests; pre-push = clang-tidy + esp32s3 firmware build.
 
 - Commit directly on `main`; small, focused commits; Conventional Commits
   (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`, `refactor:`, `build:`).
-- All commits and tags are GPG-signed (configured in the local repo config).
+- This is a fork: commits and tags are **not** GPG-signed (`commit.gpgsign=false` in the local repo config).
 - Never change global git config. Never force-push without asking. Ask before pushing.
 - Never commit `src/secrets.h` or any real password, key, or token.
 - Remotes: `origin` = git@github-denzil:denzilrdz/esp32-s3-adblock.git, `upstream` =

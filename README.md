@@ -39,6 +39,17 @@ blocklist every day on its own**. No Raspberry Pi, no SD card, no OS to patch.
 | **Tiny and low-power**                 | Runs from any stable 5 V USB supply; no computer to keep running.                                             |
 
 > [!NOTE]
+> **This is a fork** of [denzilrdz/esp32-s3-adblock](https://github.com/denzilrdz/esp32-s3-adblock)
+> (itself a fork of [M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock),
+> MIT). It targets the **Guition JC4827W543C** (ESP32-S3, 4 MB flash, 8 MB octal PSRAM)
+> and adds an on-device LVGL dashboard (queries-per-minute graph, cache/forwarded/local
+> rates, system uptime, night dimming 23:00-07:00). The 4 MB flash uses
+> `partitions_4MB.csv`, so wherever this README says 16 MB or the DevKitC-1 N16R8,
+> read it as the original project's hardware. Commits in this fork are **not
+> GPG-signed**. Build and flash with `pio run -e esp32s3`; OTA needs a real `OTA_PASS`
+> in `src/secrets.h`.
+
+> [!NOTE]
 > **Early release, in daily use on an ESP32-S3-DevKitC-1 (N16R8).** Tested on
 > hardware: Wi-Fi setup (including hidden networks and a wrong password),
 > DNS-over-TLS, blocking and bans, the daily blocklist update and its "not modified"
