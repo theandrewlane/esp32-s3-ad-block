@@ -5,12 +5,11 @@
 **A Pi-hole on a tiny board.** Network-wide ad and tracker blocking with encrypted DNS,
 running on a small ESP32-S3 board powered over USB.
 
-[![build](https://github.com/denzilrdz/esp32-s3-adblock/actions/workflows/build.yml/badge.svg)](https://github.com/denzilrdz/esp32-s3-adblock/actions/workflows/build.yml)
-[![release](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdenzilrdz.github.io%2Fesp32-s3-adblock%2Fupdate.json&query=%24.version&label=release&prefix=v&color=blue)](https://github.com/denzilrdz/esp32-s3-adblock/releases)
+[![build](https://github.com/theandrewlane/esp32-s3-ad-block/actions/workflows/build.yml/badge.svg)](https://github.com/theandrewlane/esp32-s3-ad-block/actions/workflows/build.yml)
 [![board: ESP32-S3 N16R8](https://img.shields.io/badge/board-ESP32--S3%20N16R8-e7352c)](#hardware)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[**Install from the browser**](https://denzilrdz.github.io/esp32-s3-adblock/) ·
+[**Build from source**](#quick-start) ·
 [Quick start](#quick-start) ·
 [Router setup](docs/ROUTER_SETUP.md) ·
 [How it works](#how-it-works) ·
@@ -56,7 +55,7 @@ blocklist every day on its own**. No Raspberry Pi, no SD card, no OS to patch.
 > check, failover to Quad9 and recovery after an internet outage, plain-DNS fallback on
 > and off, the dashboard, over-the-air updates and automatic rollback of a bad update.
 > Expect some rough edges; please
-> [report issues](https://github.com/denzilrdz/esp32-s3-adblock/issues).
+> [report issues](https://github.com/theandrewlane/esp32-s3-ad-block/issues).
 
 ## Contents
 
@@ -87,21 +86,21 @@ blocklist every day on its own**. No Raspberry Pi, no SD card, no OS to patch.
 
 ## Quick start
 
-You need an **ESP32-S3-DevKitC-1 (N16R8)** (or another board with that module), a USB
-data cable, a **2.4 GHz Wi-Fi** network and **admin access to your router**.
+You need a **Guition JC4827W543C** (this fork's target; the original project's
+ESP32-S3-DevKitC-1 N16R8 also works with its own partition table), a USB data cable, a **2.4 GHz Wi-Fi** network and **admin access to your router**.
 
 ### 1. Flash
 
-Open the **[web installer](https://denzilrdz.github.io/esp32-s3-adblock/)** in Chrome
-or Edge, plug the board in (DevKitC-1: the port marked **UART**), click **Install
-AdBlock** and pick the serial port (erasing the device is recommended for a first
-install). It takes about a minute.
+This fork has no browser installer or published releases yet: build and flash from
+source (macOS/Linux/Windows with PlatformIO).
 
-<details>
-<summary><b>Or build and flash from source</b> (macOS/Linux/Windows with PlatformIO)</summary>
+> [!WARNING]
+> The [original project's web installer](https://denzilrdz.github.io/esp32-s3-adblock/)
+> installs a 16 MB image for the DevKitC-1 N16R8. Do not use it on the 4 MB
+> JC4827W543C.
 
 ```bash
-git clone https://github.com/denzilrdz/esp32-s3-adblock && cd esp32-s3-adblock
+git clone https://github.com/theandrewlane/esp32-s3-ad-block && cd esp32-s3-ad-block
 cp src/secrets.example.h src/secrets.h      # optional Wi-Fi + OTA password, see comments
 pio run -e esp32s3 -t upload                # flash firmware over USB
 pio device monitor -e esp32s3               # watch it boot
@@ -109,8 +108,6 @@ pio device monitor -e esp32s3               # watch it boot
 
 Needs [PlatformIO](https://platformio.org/) (CLI or the VS Code extension) and Python
 3.11+.
-
-</details>
 
 ### 2. Connect it to Wi-Fi
 
@@ -192,11 +189,12 @@ and the _Overview_ should show a rising share of queries blocked.
 
 | Board                                      | Status      | Notes                                                   |
 | ------------------------------------------ | ----------- | ------------------------------------------------------- |
-| **ESP32-S3-DevKitC-1, WROOM-1-N16R8**      | Supported   | 16 MB flash, 8 MB octal PSRAM.                          |
+| **Guition JC4827W543C** (this fork)        | Supported   | 4 MB flash, 8 MB octal PSRAM, display (`partitions_4MB.csv`). |
+| **ESP32-S3-DevKitC-1, WROOM-1-N16R8**      | Original    | 16 MB flash, 8 MB octal PSRAM.                          |
 | Other ESP32-S3 boards with an N16R8 module | Should work | Needs 16 MB flash and 8 MB **octal** PSRAM (`qio_opi`). |
 
-Only the ESP32-S3 is supported: the blocklist and DNS cache live in PSRAM, and the
-partition table needs 16 MB of flash.
+Only the ESP32-S3 is supported: the blocklist and DNS cache live in PSRAM. The
+original partition table needs 16 MB of flash; this fork uses a 4 MB layout.
 
 **Power:** any stable 5 V USB supply: a phone charger, a computer, or a router's USB
 port if it has one.
@@ -293,10 +291,10 @@ bigger list, Hagezi's `pro-onlydomains.txt` (~370k) fits easily on the S3.
 - **From the dashboard (v0.1.2 and later):** the dashboard checks for a newer release
   when it opens (since v0.2.0; older versions: _Device → Check for updates_) and shows
   a banner when there is one. _Device → Download & install_ fetches it into the
-  browser from this project's GitHub Pages site and installs it through the normal
-  upload. Settings, Wi-Fi and the blocklist are kept. Forks: build with `-DUPDATE_BASE_URL=\"https://<you>.github.io/<repo>/\"`.
+  browser from the configured update site and installs it through the normal
+  upload. This fork has no published update site yet, so use the options below. Settings, Wi-Fi and the blocklist are kept. Forks: build with `-DUPDATE_BASE_URL=\"https://<you>.github.io/<repo>/\"`.
 - **Manual file:** _Device → Install a firmware file manually → Flash firmware_ with
-  **`firmware-esp32s3-vX.Y.Z.bin`** from a [release](https://github.com/denzilrdz/esp32-s3-adblock/releases) (not the larger
+  **`firmware-esp32s3-vX.Y.Z.bin`** built locally (`.pio/build/esp32s3/firmware.bin`) or from a release (not the larger
   `factory-…` image, which is for first installs; the board rejects it). Settings, Wi-Fi
   and the blocklist are kept. v0.1.0 can't update itself this way: install v0.1.1 or
   later over USB once (see the [changelog](CHANGELOG.md)).
@@ -358,7 +356,7 @@ checks.
 
 ## Support
 
-- **Questions and bugs:** [open an issue](https://github.com/denzilrdz/esp32-s3-adblock/issues/new/choose).
+- **Questions and bugs:** [open an issue](https://github.com/theandrewlane/esp32-s3-ad-block/issues/new/choose).
   Include the boot log from the serial console and your firmware version.
 - **Security problems:** please don't open a public issue. Report them privately as
   described in [SECURITY.md](SECURITY.md).
@@ -380,6 +378,6 @@ MIT. See [LICENSE](LICENSE) (original copyright retained).
 <div align="center">
 
 <sub>If it blocks something it shouldn't, add it to the allowlist on the dashboard, or
-<a href="https://github.com/denzilrdz/esp32-s3-adblock/issues">tell us</a> so the default list improves.</sub>
+<a href="https://github.com/theandrewlane/esp32-s3-ad-block/issues">tell us</a> so the default list improves.</sub>
 
 </div>

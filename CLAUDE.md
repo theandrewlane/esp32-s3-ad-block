@@ -105,8 +105,10 @@ native tests; pre-push = clang-tidy + esp32s3 firmware build.
 - This is a fork: commits and tags are **not** GPG-signed (`commit.gpgsign=false` in the local repo config).
 - Never change global git config. Never force-push without asking. Ask before pushing.
 - Never commit `src/secrets.h` or any real password, key, or token.
-- Remotes: `origin` = git@github-denzil:denzilrdz/esp32-s3-adblock.git, `upstream` =
-  M-Abozaid/esp32-c3-adblock (unrelated history: cherry-pick, don't merge; no tags).
+- Remotes: `origin` = https://github.com/theandrewlane/esp32-s3-ad-block.git (this fork).
+  Fork parent: denzilrdz/esp32-s3-adblock, whose parent is M-Abozaid/esp32-c3-adblock
+  (unrelated history: cherry-pick, don't merge; no tags). The `upstream` remote
+  currently points at the same URL as `origin`, so it is not a real upstream.
 - Add user-visible changes to `CHANGELOG.md` under `[Unreleased]`.
 - When you learn a new command, gotcha, or convention, update this file or the
   relevant skill in the same commit.
@@ -156,8 +158,8 @@ native tests; pre-push = clang-tidy + esp32s3 firmware build.
   `persist-credentials: false` on checkout, per-job `permissions` with a comment per
   scope, `timeout-minutes`, no `${{ }}` inside `run:` (pass via `env:`), no caches in
   release.yml. zizmor (auditor) + actionlint must be clean (CI and pre-commit).
-- **SSH alias:** the `origin` remote uses the `github-denzil` host alias from
-  `~/.ssh/config`; don't rewrite it to `github.com`.
+- **Remote URL:** `origin` uses HTTPS (credentials come from the git credential helper);
+  the old `github-denzil` SSH alias only applied to the parent project.
 - **macOS:** `pio` is at `/opt/homebrew/bin/pio` (or `.venv/bin/pio`). Don't name test
   globals `clock`/`time` (libc clash).
 
