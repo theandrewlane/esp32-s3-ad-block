@@ -12,6 +12,13 @@ All notable changes to this project are documented here. The format follows
   minutes), traffic and resolution tiles (cache, forwarded, local), latency tile and a
   system uptime clock. Backlight is 10% from 23:00 to 07:00 local time, 80% otherwise.
 
+### Changed
+
+- Larger blocklist: the updater drops the old flash copy when the new list fits only
+  alone (the loaded copy keeps serving), so lists up to ~410k entries fit the 4 MB
+  board's 2 MB LittleFS. Default list is now StevenBlack + Hagezi Pro (~276k domains),
+  published by this fork's CI.
+
 ### Fixed
 
 - Blocklist update failed at boot (`mbedtls_ssl_setup -0x7F00`, out of internal RAM): the

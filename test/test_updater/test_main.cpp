@@ -168,12 +168,49 @@ static void test_network_and_http_errors_keep_old_list() {
 
 static void test_list_too_big_for_flash_is_refused() {
   delete fs;
-  fs = new MemFileSystem(oldList.size() + 100000);  // not enough room for old + new
+  fs = new MemFileSystem(newList.size() - 1000);  // new list does not fit even alone
   fs->put("/blocklist.bin", oldList);
   http.next.body = newList;
   const auto r = run();
   TEST_ASSERT_EQUAL_STRING("not enough flash", update::updateStatusName(r.status));
   assertLiveIsOld();
+}
+
+static void test_tight_flash_drops_live_file_to_fit_the_new_list() {
+  delete fs;
+  fs = new MemFileSystem(newList.size() + 1000);  // new fits alone, not next to old
+  fs->put("/blocklist.bin", oldList);
+  http.next.body = newList;
+  const auto r = run();
+  TEST_ASSERT_TRUE(r.success());
+  TEST_ASSERT_EQUAL_STRING("updated", update::updateStatusName(r.status));
+  TEST_ASSERT_TRUE(*fs->get("/blocklist.bin") == newList);
+  TEST_ASSERT_EQUAL(1, installer.calls);
+}
+
+static void test_tight_flash_failed_download_is_reported_and_retryable() {
+  delete fs;
+  fs = new MemFileSystem(newList.size() + 1000);
+  fs->put("/blocklist.bin", oldList);
+  Bytes bad = newList;
+  bad[bad.size() / 2] ^= 0x55;  // fails the CRC after the live file was dropped
+  http.next.body = bad;
+  const auto r = run();
+  TEST_ASSERT_FALSE(r.success());
+  TEST_ASSERT_EQUAL(1, logger.count(hal::LogLevel::kWarn, "flash copy was dropped"));
+  TEST_ASSERT_NULL(fs->get("/blocklist.tmp"));
+  // The next attempt does a full download (no stale ETag against a missing file).
+  http.next.body = newList;
+  const auto r2 = run();
+  TEST_ASSERT_TRUE(r2.success());
+  TEST_ASSERT_TRUE(*fs->get("/blocklist.bin") == newList);
+}
+
+static void test_roomy_flash_keeps_live_file_until_swap() {
+  http.next.body = newList;  // 8 MB: new + old fit, so the old file is never dropped
+  const auto r = run();
+  TEST_ASSERT_TRUE(r.success());
+  TEST_ASSERT_EQUAL(0, logger.count(hal::LogLevel::kWarn, "flash copy was dropped"));
 }
 
 static void test_identical_content_without_etag_support_is_unchanged() {
@@ -264,6 +301,9 @@ int main(int, char**) {
   RUN_TEST(test_wrong_file_type_is_rejected_early);
   RUN_TEST(test_network_and_http_errors_keep_old_list);
   RUN_TEST(test_list_too_big_for_flash_is_refused);
+RUN_TEST(test_tight_flash_drops_live_file_to_fit_the_new_list);
+RUN_TEST(test_tight_flash_failed_download_is_reported_and_retryable);
+RUN_TEST(test_roomy_flash_keeps_live_file_until_swap);
   RUN_TEST(test_identical_content_without_etag_support_is_unchanged);
   RUN_TEST(test_rename_failure_restores_old_list_and_reloads_it);
   RUN_TEST(test_install_failure_is_reported);

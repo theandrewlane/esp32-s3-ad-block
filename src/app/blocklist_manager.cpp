@@ -26,7 +26,7 @@ constexpr const char* kKeyAttempt = "bl_at";
 
 #ifndef DEFAULT_BLOCKLIST_URL
 #define DEFAULT_BLOCKLIST_URL \
-  "https://github.com/denzilrdz/esp32-s3-adblock/releases/download/blocklist/blocklist.bin"
+  "https://github.com/theandrewlane/esp32-s3-ad-block/releases/download/blocklist/blocklist.bin"
 #endif
 
 void yieldBriefly() {

@@ -247,10 +247,10 @@ answered locally in milliseconds.
 **Daily update.** At 02:00 local time (plus a few random minutes), once the clock is
 synced over NTP, the device fetches the list over verified HTTPS. A list is only installed
 after its header, size, checksum and ordering check out; otherwise the current list
-stays and it retries hourly. The default list (StevenBlack + Hagezi Light, about
-100k domains, social and messaging apps keep working) is rebuilt daily by this
+stays and it retries hourly. The default list (StevenBlack + Hagezi Pro, about
+276k domains, social and messaging apps keep working) is rebuilt daily by this
 repository's CI and published at
-`https://github.com/denzilrdz/esp32-s3-adblock/releases/download/blocklist/blocklist.bin`.
+`https://github.com/theandrewlane/esp32-s3-ad-block/releases/download/blocklist/blocklist.bin`.
 If the sources didn't change, the file isn't re-uploaded and boards skip the download.
 
 Design details, memory budget and threading: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

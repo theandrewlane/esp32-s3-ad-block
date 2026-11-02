@@ -18,8 +18,13 @@ constexpr const char* kTag = "bl";
 // Writes the body to the temp file while validating it on the fly.
 class DownloadSink final : public hal::IHttpBodySink {
  public:
-  DownloadSink(hal::IFileSystem& fs, const char* path, const blocklist::Limits& limits)
-      : fs_(fs), path_(path), validator_(limits) {}
+  // `livePath`/`liveSize`: the current list on flash. When the new list does not fit
+  // next to it but would fit alone, the live file is dropped to make room (the loaded
+  // copy keeps serving lookups), which roughly doubles the largest list a small flash
+  // can take. liveSize 0 disables this.
+  DownloadSink(hal::IFileSystem& fs, const char* path, const blocklist::Limits& limits,
+               const char* livePath, size_t liveSize)
+      : fs_(fs), path_(path), validator_(limits), livePath_(livePath), liveSize_(liveSize) {}
 
   bool onBodyChunk(const uint8_t* data, size_t len) override {
     if (!file_) {
@@ -35,9 +40,15 @@ class DownloadSink final : public hal::IHttpBodySink {
     // As soon as the header is in, refuse lists that cannot fit in flash.
     if (validator_.headerSeen() && !sizeChecked_) {
       sizeChecked_ = true;
-      if (blocklist::fileSizeFor(validator_.header().count) > fs_.freeBytes() + received_) {
-        noSpace = true;
-        return false;
+      const size_t need = blocklist::fileSizeFor(validator_.header().count);
+      const size_t avail = fs_.freeBytes() + (received_ - len);  // this chunk is not written yet
+      if (need > avail) {
+        if (liveSize_ > 0 && need <= avail + liveSize_ && fs_.remove(livePath_)) {
+          liveDropped = true;
+        } else {
+          noSpace = true;
+          return false;
+        }
       }
     }
     if (file_->write(data, len) != len) {
@@ -58,12 +69,15 @@ class DownloadSink final : public hal::IHttpBodySink {
 
   bool noSpace = false;
   bool fsError = false;
+  bool liveDropped = false;  // flash copy of the live list was removed to make room
 
  private:
   hal::IFileSystem& fs_;
   const char* path_;
   blocklist::StreamValidator validator_;
   std::unique_ptr<hal::IFile> file_;
+  const char* livePath_;
+  size_t liveSize_;
   size_t received_ = 0;
   bool sizeChecked_ = false;
 };
@@ -98,6 +112,9 @@ UpdateReport BlocklistUpdater::fail(UpdateStatus s, const char* detail, int http
   snprintf(r.detail, sizeof(r.detail), "%s", detail ? detail : "");
   log_.log(LogLevel::kWarn, kTag, "update failed: %s (%s); keeping the current list", updateStatusName(s),
            r.detail);
+  if (droppedLive_)
+    log_.log(LogLevel::kWarn, kTag,
+             "the flash copy was dropped to make room: the loaded list serves until reboot, retrying later");
   return r;
 }
 
@@ -123,12 +140,18 @@ UpdateReport BlocklistUpdater::update(const char* url) {
   etagLen = strlen(etag);
 
   fs_.remove(paths_.tmp);
-  DownloadSink sink(fs_, paths_.tmp, limits_);
+  size_t liveSize = 0;
+  if (haveLive) {
+    if (auto f = fs_.open(paths_.live, hal::FileMode::kRead)) liveSize = f->size();
+  }
+  droppedLive_ = false;
+  DownloadSink sink(fs_, paths_.tmp, limits_, paths_.live, liveSize);
   hal::HttpGetRequest req;
   req.url = url;
   req.ifNoneMatch = etagLen ? etag : nullptr;
   const hal::HttpGetResult res = http_.get(req, sink);
   const FormatError fe = sink.finish();
+  droppedLive_ = sink.liveDropped;
 
   if (res.error == hal::HttpError::kConnect || res.error == hal::HttpError::kTimeout) {
     char why[sizeof(UpdateReport::detail)];

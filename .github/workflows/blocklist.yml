@@ -38,7 +38,7 @@ jobs:
           head -c 4 blocklist.bin | grep -q ADBL                  # v2 magic
           test $(( (size - 32 - 4 * 65537) % 4 )) -eq 0            # whole 32-bit entries
           test "$size" -gt $((32 + 4 * 65537 + 4 * 50000))         # >50k entries, catches a silently shrunk list
-          test "$size" -lt 3900000                                 # fits next to a download temp file on the S3
+          test "$size" -lt 1900000                                 # one copy fits the 4 MB board's 2 MB LittleFS
       - name: Publish to the 'blocklist' release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -52,7 +52,7 @@ jobs:
             exit 0
           fi
           entries=$(( ($(stat -c%s blocklist.bin) - 32 - 4 * 65537) / 4 ))
-          notes="Auto-built $(date -u +%F): ${entries} entries (StevenBlack base + Hagezi Light).
+          notes="Auto-built $(date -u +%F): ${entries} entries (StevenBlack base + Hagezi Pro).
 
           Device setting (Blocklist URL):
           https://github.com/${GITHUB_REPOSITORY}/releases/download/blocklist/blocklist.bin"

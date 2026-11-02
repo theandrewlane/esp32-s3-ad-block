@@ -8,7 +8,7 @@ lib/core/blocklist/{hash,format}.h.
 
 Usage: build_blocklist.py [--allow-missing] [out.bin] [src ...]
   src = local file or URL. With none given, downloads a balanced daily-driver set
-  (StevenBlack base + Hagezi Light) ~= 100k entries: blocks ads/trackers/malware
+  (StevenBlack base + Hagezi Pro) ~= 276k entries: blocks ads/trackers/malware
   but leaves WhatsApp/Instagram/social/messaging working.
 
   For the aggressive "test the limits" build (~500k, also blocks social/messaging):
@@ -32,12 +32,13 @@ V2_MASK = (1 << V2_HASH_BITS) - 1
 V2_BUCKETS = 1 << V2_PREFIX_BITS
 
 # Default daily-driver list: ads + trackers + malware, WhatsApp/social keep working.
-# ~100k entries (~0.65 MB in format v2). Hagezi's wildcard lists drop subdomains the
-# firmware's parent matching already covers. Want more? pro-onlydomains.txt (~370k)
-# fits easily (the firmware accepts up to 1M entries).
+# ~276k entries (~1.3 MB in format v2). Hagezi's wildcard lists drop subdomains the
+# firmware's parent matching already covers. Keep the file under ~1.9 MB so one copy
+# fits in the 4 MB board's 2 MB LittleFS (the updater drops the old flash copy to make
+# room; ~410k entries is the ceiling there).
 DEFAULT_SOURCES = [
     "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",  # base: ads + malware
-    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt",  # Hagezi Light (wildcard = domain + subdomains)
+    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",  # Hagezi Pro (wildcard = domain + subdomains)
 ]
 
 # ||domain^  or  @@||domain^  optionally followed by $modifiers

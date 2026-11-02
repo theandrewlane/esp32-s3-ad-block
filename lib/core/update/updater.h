@@ -3,7 +3,9 @@
 // (ARCHITECTURE.md §6.3):
 //
 //   GET (If-None-Match: last ETag) -> 304: unchanged
-//   200 -> stream to /blocklist.tmp while checking header, size and CRC
+//   200 -> stream to /blocklist.tmp while checking header, size and CRC (if the new list
+//          fits only without the live file, that file is dropped first: the loaded copy
+//          keeps serving, and a failed download is retried by the scheduler)
 //       -> full structural validation of the temp file
 //       -> identical CRC to the live list: unchanged
 //       -> live -> .old, tmp -> live, delete .old   (boot recovery handles a crash)
@@ -104,6 +106,7 @@ class BlocklistUpdater {
   hal::ILogger& log_;
   Paths paths_;
   blocklist::ProgressFn tick_ = nullptr;
+  bool droppedLive_ = false;  // this update removed the live flash file to fit the new list
 };
 
 }  // namespace update
