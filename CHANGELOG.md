@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Blocklist update failed at boot (`mbedtls_ssl_setup -0x7F00`, out of internal RAM): the
+  display's draw buffers and LVGL allocations now live in PSRAM, freeing about 60 KB.
 - Display never refreshed (LVGL 9 had no tick source) and showed wrong colors (bytes
   were swapped twice).
 

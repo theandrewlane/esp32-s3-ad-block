@@ -10,7 +10,8 @@ namespace display {
 Nv3041aPanel Nv3041aPanel::instance_;
 
 // Draw buffer size: 480 × 20 lines × 2 bytes (RGB565).
-// Allocated in internal DMA-capable RAM (not PSRAM).
+// Allocated in PSRAM: Arduino_ESP32QSPI copies pixels into its own internal DMA buffer
+// in 1024-pixel chunks, so the source never needs to be DMA-capable.
 static constexpr size_t kBufLines = 20;
 static constexpr size_t kBufBytes = kLcdWidth * kBufLines * sizeof(uint16_t);
 
@@ -28,9 +29,9 @@ bool Nv3041aPanel::init(lv_display_t** dispOut) {
   ledcAttach(kPinBl, 1000, 8);
   setBrightness(80);
 
-  // ---- LVGL draw buffers in internal DMA RAM ----
-  sBuf1 = static_cast<uint8_t*>(heap_caps_malloc(kBufBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
-  sBuf2 = static_cast<uint8_t*>(heap_caps_malloc(kBufBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+  // ---- LVGL draw buffers in PSRAM ----
+  sBuf1 = static_cast<uint8_t*>(heap_caps_aligned_alloc(64, kBufBytes, MALLOC_CAP_SPIRAM));
+  sBuf2 = static_cast<uint8_t*>(heap_caps_aligned_alloc(64, kBufBytes, MALLOC_CAP_SPIRAM));
   if (!sBuf1 || !sBuf2) return false;
 
   // ---- Register LVGL display ----

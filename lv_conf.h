@@ -19,7 +19,7 @@
    STDLIB
  *====================*/
 /** Use the C standard library for malloc/string/sprintf */
-#define LV_USE_STDLIB_MALLOC  1  /* 1 = LV_STDLIB_CLIB */
+#define LV_USE_STDLIB_MALLOC  255  /* LV_STDLIB_CUSTOM: PSRAM allocator in display_task.cpp, keeps internal RAM for TLS */
 #define LV_USE_STDLIB_STRING  1
 #define LV_USE_STDLIB_SPRINTF 1
 

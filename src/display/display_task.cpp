@@ -1,6 +1,7 @@
 // Arduino.h must come first — it configures macros needed by ESP32 headers.
 #include <Arduino.h>
 #include <Wire.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
@@ -18,6 +19,22 @@
 #include "app/blocklist_manager.h"
 #include "app/clients.h"
 #include "upstream/health.h"
+
+
+// LVGL allocator (lv_conf.h: LV_STDLIB_CUSTOM). Everything LVGL allocates (objects,
+// styles, chart/table data) goes to PSRAM so internal RAM stays free for TLS sessions
+// (a third TLS handshake needs ~45 KB contiguous; see ARCHITECTURE.md memory budget).
+extern "C" {
+void lv_mem_init(void) {}
+void lv_mem_deinit(void) {}
+lv_mem_pool_t lv_mem_add_pool(void*, size_t) { return nullptr; }
+void lv_mem_remove_pool(lv_mem_pool_t) {}
+void* lv_malloc_core(size_t size) { return heap_caps_malloc(size, MALLOC_CAP_SPIRAM); }
+void* lv_realloc_core(void* p, size_t size) { return heap_caps_realloc(p, size, MALLOC_CAP_SPIRAM); }
+void lv_free_core(void* p) { heap_caps_free(p); }
+void lv_mem_monitor_core(lv_mem_monitor_t*) {}
+lv_result_t lv_mem_test_core(void) { return LV_RESULT_OK; }
+}
 
 namespace display {
 
@@ -141,7 +158,7 @@ static void buildOverview() {
   lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
   lv_obj_t* title = makeLabel(hdr, &lv_font_montserrat_16, kColText);
-  lv_label_set_text(title, "Penthouse Adblocker");
+  lv_label_set_text(title, "theandrewlane DNS Adblocker");
   lv_obj_set_pos(title, 0, 1);
 
   gScr.ovUptime = makeLabel(hdr, &lv_font_montserrat_10, kColText, LV_TEXT_ALIGN_RIGHT);
