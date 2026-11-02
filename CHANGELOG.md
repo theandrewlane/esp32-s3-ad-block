@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- On-device display dashboard: queries-per-minute graph (allowed and blocked, last 30
+  minutes), traffic and resolution tiles (cache, forwarded, local), latency tile and a
+  system uptime clock. Backlight is 10% from 23:00 to 07:00 local time, 80% otherwise.
+
+### Fixed
+
+- Display never refreshed (LVGL 9 had no tick source) and showed wrong colors (bytes
+  were swapped twice).
+
 ## [0.2.8] - 2026-10-23
 
 Every possible hang now ends in a restart with its reason, and failed blocklist

@@ -31,6 +31,9 @@ class Nv3041aPanel {
   // Must be called before lv_init().  Returns false on allocation failure.
   bool init(lv_display_t** dispOut);
 
+  // Backlight brightness, 0-100 %.
+  static void setBrightness(uint8_t percent);
+
   // Static flush callback registered with LVGL.
   static void flushCb(lv_display_t* disp, const lv_area_t* area, uint8_t* pxMap);
 

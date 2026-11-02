@@ -1,6 +1,8 @@
 #include "display/panel/nv3041a.h"
 
 #include <Arduino.h>
+
+#include <algorithm>
 #include <esp_heap_caps.h>
 
 namespace display {
@@ -24,7 +26,7 @@ bool Nv3041aPanel::init(lv_display_t** dispOut) {
 
   // ---- Backlight (GPIO1) — Arduino-ESP32 3.x pin-based LEDC API ----
   ledcAttach(kPinBl, 1000, 8);
-  ledcWrite(kPinBl, 255);
+  setBrightness(80);
 
   // ---- LVGL draw buffers in internal DMA RAM ----
   sBuf1 = static_cast<uint8_t*>(heap_caps_malloc(kBufBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
@@ -33,13 +35,17 @@ bool Nv3041aPanel::init(lv_display_t** dispOut) {
 
   // ---- Register LVGL display ----
   lv_display_t* disp = lv_display_create(kLcdWidth, kLcdHeight);
-  lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);  // big-endian for NV3041A
+  lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);  // native; Arduino_GFX swaps bytes itself
   lv_display_set_flush_cb(disp, flushCb);
   lv_display_set_buffers(disp, sBuf1, sBuf2, kBufBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_set_user_data(disp, this);
 
   if (dispOut) *dispOut = disp;
   return true;
+}
+
+void Nv3041aPanel::setBrightness(uint8_t percent) {
+  ledcWrite(kPinBl, static_cast<uint32_t>(std::min<uint8_t>(percent, 100)) * 255 / 100);
 }
 
 void Nv3041aPanel::flushCb(lv_display_t* disp, const lv_area_t* area, uint8_t* pxMap) {

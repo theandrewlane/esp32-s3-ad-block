@@ -4,6 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
+#include <ctime>
 #include <lvgl.h>
 
 // Display hardware drivers (Arduino_GFX after LVGL to avoid header conflicts).
@@ -48,27 +49,22 @@ struct Screens {
   lv_obj_t* ovChart         = nullptr;
   lv_chart_series_t* ovSeries1 = nullptr;  // total queries
   lv_chart_series_t* ovSeries2 = nullptr;  // blocked
+  lv_obj_t* ovChartMax      = nullptr;  // y-axis max label
+  lv_obj_t* ovCache         = nullptr;
+  lv_obj_t* ovFwd           = nullptr;
+  lv_obj_t* ovLocal         = nullptr;
   lv_obj_t* ovLog[4]        = {};           // 4 recent-query rows
-  lv_obj_t* ovUpDot[2]      = {};           // upstream status dots
   lv_obj_t* ovUptime        = nullptr;
 
   // --- Top Blocked ---
   lv_obj_t* tbRoot          = nullptr;
   lv_obj_t* tbRows[8]       = {};  // label for each row
 
-  // --- Top Clients ---
-  lv_obj_t* tcRoot          = nullptr;
-  lv_obj_t* tcTable         = nullptr;
-
-  // Navigation dots on each screen
-  lv_obj_t* ovDots[3]       = {};
-  lv_obj_t* tbDots[3]       = {};
-  lv_obj_t* tcDots[3]       = {};
 };
 
 static DisplayContext gCtx;
 static Screens        gScr;
-static int            gCurrentScreen = 0;  // 0=overview, 1=top-blocked, 2=top-clients
+static int            gCurrentScreen = 0;  // 0=overview, 1=top-blocked
 
 // ============================================================
 // Helpers
@@ -97,35 +93,25 @@ static lv_obj_t* makeLabel(lv_obj_t* parent, const lv_font_t* font, lv_color_t c
   return l;
 }
 
-static lv_obj_t* makeDot(lv_obj_t* parent, bool active) {
-  lv_obj_t* d = lv_obj_create(parent);
-  lv_obj_set_size(d, 8, 8);
-  lv_obj_set_style_radius(d, 4, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(d, active ? kColText : kColSubtext, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(d, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(d, 0, LV_PART_MAIN);
-  return d;
-}
-
-// Format an integer with comma-thousands separator into buf.
+// Format a count for a tile: 1,234 below 10k, then 14.6k, then 1.2M.
 static void fmtInt(char* buf, size_t bufsz, uint32_t v) {
   if (v < 1000) {
     snprintf(buf, bufsz, "%lu", (unsigned long)v);
-  } else if (v < 1000000) {
+  } else if (v < 10000) {
     snprintf(buf, bufsz, "%lu,%03lu", (unsigned long)(v / 1000), (unsigned long)(v % 1000));
-  } else {
-    snprintf(buf, bufsz, "%lu.%luM", (unsigned long)(v / 1000000),
-             (unsigned long)((v % 1000000) / 100000));
+  } else if (v < 999950) {  // 14561 -> "14.6k" (rounded; 999950+ would show "1000.0k")
+    uint32_t tenths = (v + 50) / 100;
+    snprintf(buf, bufsz, "%lu.%luk", (unsigned long)(tenths / 10), (unsigned long)(tenths % 10));
+  } else {  // 1234567 -> "1.2M"
+    uint32_t tenths = (v + 50000) / 100000;
+    snprintf(buf, bufsz, "%lu.%luM", (unsigned long)(tenths / 10), (unsigned long)(tenths % 10));
   }
 }
 
 // Cycle to the next screen on tap.
 static void screenTapCb(lv_event_t* /*e*/) {
-  gCurrentScreen = (gCurrentScreen + 1) % 3;
-  lv_obj_t* next = nullptr;
-  if (gCurrentScreen == 0) next = gScr.ovRoot;
-  else if (gCurrentScreen == 1) next = gScr.tbRoot;
-  else                           next = gScr.tcRoot;
+  gCurrentScreen = (gCurrentScreen + 1) % 2;
+  lv_obj_t* next = gCurrentScreen == 0 ? gScr.ovRoot : gScr.tbRoot;
   lv_screen_load_anim(next, LV_SCR_LOAD_ANIM_MOVE_LEFT, 250, 0, false);
 }
 
@@ -155,68 +141,69 @@ static void buildOverview() {
   lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
   lv_obj_t* title = makeLabel(hdr, &lv_font_montserrat_16, kColText);
-  lv_label_set_text(title, "DNS AdBlock");
+  lv_label_set_text(title, "Penthouse Adblocker");
   lv_obj_set_pos(title, 0, 1);
 
-  // Upstream dots
-  for (int i = 0; i < 2; ++i) {
-    gScr.ovUpDot[i] = lv_obj_create(hdr);
-    lv_obj_set_size(gScr.ovUpDot[i], 10, 10);
-    lv_obj_set_style_radius(gScr.ovUpDot[i], 5, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(gScr.ovUpDot[i], LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(gScr.ovUpDot[i], kColUnknown, LV_PART_MAIN);
-    lv_obj_set_style_border_width(gScr.ovUpDot[i], 0, LV_PART_MAIN);
-    lv_obj_set_pos(gScr.ovUpDot[i], 260 + i * 16, 5);
-  }
+  gScr.ovUptime = makeLabel(hdr, &lv_font_montserrat_10, kColText, LV_TEXT_ALIGN_RIGHT);
+  lv_obj_set_size(gScr.ovUptime, 200, 18);
+  lv_obj_align(gScr.ovUptime, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  gScr.ovUptime = makeLabel(hdr, &lv_font_montserrat_12, kColSubtext, LV_TEXT_ALIGN_RIGHT);
-  lv_obj_set_size(gScr.ovUptime, 160, 20);
-  lv_obj_align(gScr.ovUptime, LV_ALIGN_RIGHT_MID, -4, 0);
-
-  // Navigation dots (top-right area after uptime)
-  for (int i = 0; i < 3; ++i) {
-    gScr.ovDots[i] = makeDot(hdr, i == 0);
-    lv_obj_set_pos(gScr.ovDots[i], 430 + i * 10, 13);
-  }
-
-  // ---- Stat cards (y=36, h=64) ----
-  const char* cardLabels[] = {"QUERIES", "BLOCKED", "RATIO", "LATENCY"};
-  lv_obj_t** cardVals[]    = {&gScr.ovQueries, &gScr.ovBlocked, &gScr.ovRatio, &gScr.ovLatency};
-  static const lv_color_t cardValCols[] = {kColAccent, kColBlocked, kColAllowed, kColSubtext};
-
-  for (int i = 0; i < 4; ++i) {
+  // ---- Stat tiles (y=36, h=62): traffic | resolution | latency ----
+  struct Stat { lv_obj_t** val; const char* label; lv_color_t col; };
+  auto makeTile = [&](int x, int w, const Stat* stats, int n) {
     lv_obj_t* card = lv_obj_create(scr);
-    lv_obj_set_size(card, 118, 62);
-    lv_obj_set_pos(card, 2 + i * 120, 36);
+    lv_obj_set_size(card, w, 62);
+    lv_obj_set_pos(card, x, 36);
     applyCard(card);
+    lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    int colW = w / n;
+    for (int i = 0; i < n; ++i) {
+      *stats[i].val = makeLabel(card, &lv_font_montserrat_20, stats[i].col, LV_TEXT_ALIGN_CENTER);
+      lv_obj_set_size(*stats[i].val, colW, 28);
+      lv_obj_set_pos(*stats[i].val, i * colW, 6);
+      lv_obj_t* lbl = makeLabel(card, &lv_font_montserrat_10, kColSubtext, LV_TEXT_ALIGN_CENTER);
+      lv_obj_set_size(lbl, colW, 14);
+      lv_obj_set_pos(lbl, i * colW, 40);
+      lv_label_set_text(lbl, stats[i].label);
+    }
+  };
+  const Stat traffic[] = {{&gScr.ovQueries, "QUERIES", kColAccent},
+                          {&gScr.ovBlocked, "BLOCKED", kColBlocked},
+                          {&gScr.ovRatio, "BLOCK %", kColAllowed}};
+  const Stat resolve[] = {{&gScr.ovCache, "CACHE", kColAccent},
+                          {&gScr.ovFwd, "FORWARDED", kColUnknown},
+                          {&gScr.ovLocal, "LOCAL", kColAllowed}};
+  const Stat latency[] = {{&gScr.ovLatency, "LATENCY", kColText}};
+  makeTile(2, 176, traffic, 3);
+  makeTile(182, 216, resolve, 3);  // wide enough for FORWARDED
+  makeTile(402, 76, latency, 1);
 
-    *cardVals[i] = makeLabel(card, &lv_font_montserrat_20, cardValCols[i],
-                             LV_TEXT_ALIGN_CENTER);
-    lv_obj_set_size(*cardVals[i], 110, 28);
-    lv_obj_set_pos(*cardVals[i], 0, 4);
-
-    lv_obj_t* lbl = makeLabel(card, &lv_font_montserrat_12, kColSubtext, LV_TEXT_ALIGN_CENTER);
-    lv_obj_set_size(lbl, 110, 18);
-    lv_obj_set_pos(lbl, 0, 36);
-    lv_label_set_text(lbl, cardLabels[i]);
-  }
-
-  // ---- 24h bar chart (y=100, h=96) ----
+  // ---- Queries-per-minute line chart, last 30 min (y=100, h=92) ----
   lv_obj_t* chart = lv_chart_create(scr);
   gScr.ovChart    = chart;
   lv_obj_set_size(chart, 476, 92);
   lv_obj_set_pos(chart, 2, 100);
-  lv_chart_set_type(chart, LV_CHART_TYPE_BAR);
-  lv_chart_set_point_count(chart, DisplayStats::kHourlyBuckets);
+  lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+  lv_chart_set_point_count(chart, DisplayStats::kMinuteBuckets);
+  lv_obj_set_style_size(chart, 0, 0, LV_PART_INDICATOR);  // no point markers
+  lv_obj_set_style_line_width(chart, 2, LV_PART_ITEMS);
   applyBg(chart, kColCard);
   lv_obj_set_style_radius(chart, 4, LV_PART_MAIN);
   lv_obj_set_style_pad_all(chart, 4, LV_PART_MAIN);
+  lv_obj_set_style_pad_top(chart, 20, LV_PART_MAIN);  // keep the plot below the title row
   lv_chart_set_div_line_count(chart, 3, 0);
   lv_obj_set_style_line_color(chart, LV_COLOR_MAKE(0x40, 0x40, 0x50), LV_PART_MAIN);
 
   gScr.ovSeries1 = lv_chart_add_series(chart, kColAccent,  LV_CHART_AXIS_PRIMARY_Y);
   gScr.ovSeries2 = lv_chart_add_series(chart, kColBlocked, LV_CHART_AXIS_PRIMARY_Y);
+
+  lv_obj_t* chartTitle = makeLabel(scr, &lv_font_montserrat_10, kColText, LV_TEXT_ALIGN_LEFT);
+  lv_label_set_text(chartTitle, "Queries per minute (30 min):  blue allowed, red blocked");
+  lv_obj_set_pos(chartTitle, 8, 103);  // over the chart's padded-off top row
+  gScr.ovChartMax = makeLabel(scr, &lv_font_montserrat_12, kColSubtext, LV_TEXT_ALIGN_RIGHT);
+  lv_obj_set_size(gScr.ovChartMax, 90, 16);
+  lv_obj_set_pos(gScr.ovChartMax, 384, 103);
 
   // ---- Recent query log (y=195, h=77) ----
   for (int i = 0; i < 4; ++i) {
@@ -262,11 +249,6 @@ static void buildTopBlocked() {
   lv_label_set_text(title, "Top Blocked Domains (24h)");
   lv_obj_set_pos(title, 0, 1);
 
-  for (int i = 0; i < 3; ++i) {
-    gScr.tbDots[i] = makeDot(hdr, i == 1);
-    lv_obj_set_pos(gScr.tbDots[i], 430 + i * 10, 13);
-  }
-
   // 8 domain rows (y=36, 29px each)
   for (int i = 0; i < 8; ++i) {
     lv_obj_t* row = lv_obj_create(scr);
@@ -288,71 +270,26 @@ static void buildTopBlocked() {
 }
 
 // ============================================================
-// Screen 2: Top Clients
+// Periodic data-refresh timer (fires every second)
 // ============================================================
-static void buildTopClients() {
-  lv_obj_t* scr  = lv_obj_create(nullptr);
-  gScr.tcRoot    = scr;
-  applyBg(scr, kColBg);
-  lv_obj_set_size(scr, 480, 272);
-  lv_obj_set_style_pad_all(scr, 0, LV_PART_MAIN);
-  addTapToScreen(scr);
-
-  // Header
-  lv_obj_t* hdr = lv_obj_create(scr);
-  lv_obj_set_size(hdr, 480, 34);
-  lv_obj_set_pos(hdr, 0, 0);
-  applyBg(hdr, kColHeaderBg);
-  lv_obj_set_style_pad_hor(hdr, 8, LV_PART_MAIN);
-  lv_obj_set_style_pad_ver(hdr, 6, LV_PART_MAIN);
-  lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
-
-  lv_obj_t* title = makeLabel(hdr, &lv_font_montserrat_16, kColText);
-  lv_label_set_text(title, "Top Clients");
-  lv_obj_set_pos(title, 0, 1);
-
-  for (int i = 0; i < 3; ++i) {
-    gScr.tcDots[i] = makeDot(hdr, i == 2);
-    lv_obj_set_pos(gScr.tcDots[i], 430 + i * 10, 13);
+// 10% from 23:00 to 07:00 local time, 80% otherwise (and while the clock isn't synced).
+static void updateBrightness() {
+  static int lastPct = -1;
+  time_t now = time(nullptr);
+  int pct = 80;
+  if (now > 1700000000) {  // clock synced
+    struct tm t;
+    localtime_r(&now, &t);
+    if (t.tm_hour >= 23 || t.tm_hour < 7) pct = 10;
   }
-
-  // Table
-  lv_obj_t* tbl = lv_table_create(scr);
-  gScr.tcTable  = tbl;
-  lv_obj_set_size(tbl, 476, 234);
-  lv_obj_set_pos(tbl, 2, 36);
-  lv_obj_set_style_text_font(tbl, &lv_font_montserrat_12, LV_PART_MAIN);
-  lv_obj_set_style_text_font(tbl, &lv_font_montserrat_12, LV_PART_ITEMS);
-  applyBg(tbl, kColCard);
-  lv_obj_set_style_pad_hor(tbl, 0, LV_PART_MAIN);
-  lv_obj_set_style_pad_ver(tbl, 0, LV_PART_MAIN);
-  lv_obj_set_style_border_width(tbl, 0, LV_PART_MAIN);
-
-  // Column widths: IP(160) Queries(80) Blocked(80) %(72)
-  lv_table_set_col_cnt(tbl, 4);
-  lv_table_set_col_width(tbl, 0, 160);
-  lv_table_set_col_width(tbl, 1, 90);
-  lv_table_set_col_width(tbl, 2, 90);
-  lv_table_set_col_width(tbl, 3, 80);
-
-  lv_table_set_cell_value(tbl, 0, 0, "Client IP");
-  lv_table_set_cell_value(tbl, 0, 1, "Queries");
-  lv_table_set_cell_value(tbl, 0, 2, "Blocked");
-  lv_table_set_cell_value(tbl, 0, 3, "Rate");
-
-  // Rows 1..8 filled by refresh callback.
-  lv_table_set_row_cnt(tbl, 9);
-  for (uint16_t r = 1; r < 9; ++r) {
-    for (uint16_t c = 0; c < 4; ++c) {
-      lv_table_set_cell_value(tbl, r, c, "");
-    }
+  if (pct != lastPct) {
+    Nv3041aPanel::setBrightness(static_cast<uint8_t>(pct));
+    lastPct = pct;
   }
 }
 
-// ============================================================
-// Periodic data-refresh timer (fires every second)
-// ============================================================
 static void refreshCb(lv_timer_t* /*t*/) {
+  updateBrightness();
   // ---- Stats from DNS service ----
   app::DnsStats    ds  = gCtx.dns->stats();
   app::UpstreamSnapshot us = gCtx.dns->upstreams();
@@ -372,6 +309,15 @@ static void refreshCb(lv_timer_t* /*t*/) {
   }
   lv_label_set_text(gScr.ovRatio, buf);
 
+  auto pct = [&](uint32_t n, lv_obj_t* lbl) {
+    if (ds.queries > 0) snprintf(buf, sizeof(buf), "%.0f%%", 100.0f * n / ds.queries);
+    else                snprintf(buf, sizeof(buf), "0%%");
+    lv_label_set_text(lbl, buf);
+  };
+  pct(ds.cacheHits, gScr.ovCache);
+  pct(ds.forwarded, gScr.ovFwd);
+  pct(ds.local, gScr.ovLocal);
+
   // Avg latency from upstream stats (last_latency of best upstream).
   uint32_t latency = 0;
   for (size_t i = 0; i < us.count; ++i) {
@@ -383,50 +329,34 @@ static void refreshCb(lv_timer_t* /*t*/) {
   snprintf(buf, sizeof(buf), "%lums", (unsigned long)latency);
   lv_label_set_text(gScr.ovLatency, buf);
 
-  // Upstream status dots.
-  for (size_t i = 0; i < 2; ++i) {
-    if (i >= us.count) {
-      lv_obj_set_style_bg_color(gScr.ovUpDot[i], kColUnknown, LV_PART_MAIN);
-      continue;
-    }
-    upstream::HealthState state = us.status[i].state;
-    lv_color_t col = (state == upstream::HealthState::kUp)    ? kColUp :
-                     (state == upstream::HealthState::kDown)   ? kColDown : kColUnknown;
-    lv_obj_set_style_bg_color(gScr.ovUpDot[i], col, LV_PART_MAIN);
-  }
-
   // Uptime.
   uint32_t sec  = millis() / 1000;
   uint32_t days = sec / 86400; sec %= 86400;
   uint32_t hrs  = sec / 3600;  sec %= 3600;
   uint32_t mins = sec / 60;
-  if (days > 0) snprintf(buf, sizeof(buf), "%lud %02lu:%02lu", (unsigned long)days,
-                         (unsigned long)hrs, (unsigned long)mins);
-  else          snprintf(buf, sizeof(buf), "%02lu:%02lu", (unsigned long)hrs,
-                         (unsigned long)mins);
+  snprintf(buf, sizeof(buf), "System Uptime %02lu:%02lu:%02lu", (unsigned long)days, (unsigned long)hrs,
+           (unsigned long)mins);  // DD:HH:MM
   lv_label_set_text(gScr.ovUptime, buf);
 
-  // ---- 24h chart ----
+  // ---- Queries-per-minute chart ----
   {
-    DisplayStats::HourlyBucket hourly[DisplayStats::kHourlyBuckets];
-    gCtx.stats->copyHourly(hourly);
-    uint32_t curHour = (millis() / 3600000UL) % DisplayStats::kHourlyBuckets;
-    int32_t maxQ = 1;
-    for (size_t i = 0; i < DisplayStats::kHourlyBuckets; ++i) {
-      if ((int32_t)hourly[i].queries > maxQ) maxQ = (int32_t)hourly[i].queries;
+    DisplayStats::MinuteBucket mins[DisplayStats::kMinuteBuckets];
+    gCtx.stats->copyMinutes(millis(), mins);
+    int32_t maxQ = 5;
+    for (size_t i = 0; i < DisplayStats::kMinuteBuckets; ++i) {
+      maxQ = std::max<int32_t>(maxQ, std::max<int32_t>(mins[i].allowed, mins[i].blocked));
     }
     lv_chart_set_range(gScr.ovChart, LV_CHART_AXIS_PRIMARY_Y, 0, maxQ);
-    // Map bucket[curHour] → rightmost column (index 23 = most recent hour).
-    for (size_t i = 0; i < DisplayStats::kHourlyBuckets; ++i) {
-      size_t srcBucket = (curHour + 1 + i) % DisplayStats::kHourlyBuckets;
+    for (size_t i = 0; i < DisplayStats::kMinuteBuckets; ++i) {
       lv_chart_set_value_by_id(gScr.ovChart, gScr.ovSeries1, (uint16_t)i,
-                               static_cast<int32_t>(hourly[srcBucket].queries));
+                               static_cast<int32_t>(mins[i].allowed));
       lv_chart_set_value_by_id(gScr.ovChart, gScr.ovSeries2, (uint16_t)i,
-                               static_cast<int32_t>(hourly[srcBucket].blocked));
+                               static_cast<int32_t>(mins[i].blocked));
     }
+    snprintf(buf, sizeof(buf), "max %ld", (long)maxQ);
+    lv_label_set_text(gScr.ovChartMax, buf);
     lv_chart_refresh(gScr.ovChart);
   }
-
   // ---- Recent query log (last 4, newest last) ----
   {
     DisplayStats::QueryEvent log[DisplayStats::kLogCapacity];
@@ -486,43 +416,6 @@ static void refreshCb(lv_timer_t* /*t*/) {
     }
   }
 
-  // ---- Top Clients ----
-  {
-    auto clients = gCtx.clients->snapshot();
-    // Sort by (allowed + blocked) desc.
-    std::sort(clients.begin(), clients.end(), [](const app::ClientInfo& a, const app::ClientInfo& b) {
-      return (a.allowed + a.blocked) > (b.allowed + b.blocked);
-    });
-
-    int rows = std::min<int>(8, (int)clients.size());
-    lv_table_set_row_cnt(gScr.tcTable, rows + 1);
-
-    for (int i = 0; i < rows; ++i) {
-      const auto& c = clients[i];
-      uint32_t h = ntohl(c.ip);
-      char ipCell[16];
-      snprintf(ipCell, sizeof(ipCell), "%lu.%lu.%lu.%lu",
-               (unsigned long)((h >> 24) & 0xFF), (unsigned long)((h >> 16) & 0xFF),
-               (unsigned long)((h >>  8) & 0xFF), (unsigned long)( h        & 0xFF));
-      lv_table_set_cell_value(gScr.tcTable, i + 1, 0, ipCell);
-
-      char tmp[16];
-      fmtInt(tmp, sizeof(tmp), c.allowed + c.blocked);
-      lv_table_set_cell_value(gScr.tcTable, i + 1, 1, tmp);
-
-      fmtInt(tmp, sizeof(tmp), c.blocked);
-      lv_table_set_cell_value(gScr.tcTable, i + 1, 2, tmp);
-
-      uint32_t total = c.allowed + c.blocked;
-      if (total > 0) snprintf(tmp, sizeof(tmp), "%lu%%", (unsigned long)(100UL * c.blocked / total));
-      else           snprintf(tmp, sizeof(tmp), "0%%");
-      lv_table_set_cell_value(gScr.tcTable, i + 1, 3, tmp);
-    }
-    // Clear unused rows.
-    for (int i = rows; i < 8; ++i) {
-      for (int c = 0; c < 4; ++c) lv_table_set_cell_value(gScr.tcTable, i + 1, c, "");
-    }
-  }
 }
 
 // ============================================================
@@ -534,6 +427,7 @@ static void displayTaskEntry(void* arg) {
   Gt911Touch::instance().init();
 
   lv_init();
+  lv_tick_set_cb([]() -> uint32_t { return millis(); });  // LVGL 9 has no LV_TICK_CUSTOM
 
   lv_display_t* disp = nullptr;
   if (!Nv3041aPanel::instance().init(&disp)) {
@@ -550,7 +444,6 @@ static void displayTaskEntry(void* arg) {
   // 3. Build all screens.
   buildOverview();
   buildTopBlocked();
-  buildTopClients();
 
   // 4. Load the overview screen.
   lv_screen_load(gScr.ovRoot);

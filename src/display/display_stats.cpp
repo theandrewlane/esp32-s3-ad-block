@@ -25,6 +25,17 @@ void DisplayStats::record(const char* qname, uint8_t qnameLen, uint32_t clientIp
   ++b.queries;
   if (blocked) ++b.blocked;
 
+  // --- per-minute buckets (allowed/blocked) ---
+  uint32_t minute = timeMs / 60000UL;
+  size_t mi = minute % kMinuteBuckets;
+  if (!minuteUsed_[mi] || minuteId_[mi] != minute) {
+    minutes_[mi] = MinuteBucket{};
+    minuteId_[mi] = minute;
+    minuteUsed_[mi] = true;
+  }
+  if (blocked) ++minutes_[mi].blocked;
+  else ++minutes_[mi].allowed;
+
   // --- top blocked domains ---
   if (blocked) updateTop(ev.domain);
 }
@@ -65,6 +76,16 @@ void DisplayStats::copyLog(QueryEvent out[kLogCapacity], size_t* count) const {
 void DisplayStats::copyHourly(HourlyBucket out[kHourlyBuckets]) const {
   platform::LockGuard lock(mutex_);
   memcpy(out, hourly_, kHourlyBuckets * sizeof(HourlyBucket));
+}
+
+void DisplayStats::copyMinutes(uint32_t nowMs, MinuteBucket out[kMinuteBuckets]) const {
+  platform::LockGuard lock(mutex_);
+  uint32_t cur = nowMs / 60000UL;
+  for (size_t i = 0; i < kMinuteBuckets; ++i) {
+    uint32_t want = cur + 1 + i - kMinuteBuckets;  // i = kMinuteBuckets-1 -> current minute
+    size_t mi = want % kMinuteBuckets;
+    out[i] = (minuteUsed_[mi] && minuteId_[mi] == want) ? minutes_[mi] : MinuteBucket{};
+  }
 }
 
 void DisplayStats::copyTopDomains(TopDomain out[kTopDomainsN], size_t* count) const {
