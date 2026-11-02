@@ -21,6 +21,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- No crash dumps were kept: added a 64 KB core-dump partition (the app slot shrinks to
+  1.9 MB; LittleFS offset unchanged, so the stored list is kept).
 - Blocklist update failed at boot (`mbedtls_ssl_setup -0x7F00`, out of internal RAM): the
   display's draw buffers and LVGL allocations now live in PSRAM, freeing about 60 KB.
 - Display never refreshed (LVGL 9 had no tick source) and showed wrong colors (bytes

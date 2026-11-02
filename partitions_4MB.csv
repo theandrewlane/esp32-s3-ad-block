@@ -3,7 +3,10 @@
 # The factory subtype means the bootloader boots it unconditionally (no otadata needed).
 # The spiffs label is required by LittleFS.begin() — changing it wipes data.
 # Changing offsets wipes data and requires a USB flash.
+# coredump: 64 KB for crash dumps (see skill debugging); the spiffs offset is unchanged,
+# so the stored blocklist survives this layout change.
 # Name,    Type, SubType,  Offset,   Size
 nvs,       data, nvs,      0x9000,   0x5000
-app0,      app,  factory,  0x10000,  0x1F0000
+app0,      app,  factory,  0x10000,  0x1E0000
+coredump,  data, coredump, 0x1F0000, 0x10000
 spiffs,    data, spiffs,   0x200000, 0x200000
