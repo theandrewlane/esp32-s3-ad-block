@@ -16,8 +16,7 @@ namespace app {
 
 class AppPolicy final : public dns::IQueryPolicy {
  public:
-  AppPolicy(ClientTable& clients, BlocklistManager& blocklist,
-            display::DisplayStats* stats = nullptr)
+  AppPolicy(ClientTable& clients, BlocklistManager& blocklist, display::DisplayStats* stats = nullptr)
       : clients_(clients), blocklist_(blocklist), stats_(stats) {}
 
   dns::PolicyAction decide(const dns::Query& q, uint32_t clientIpv4) override {
@@ -27,11 +26,26 @@ class AppPolicy final : public dns::IQueryPolicy {
                          blocklist_.matcher().match(q.qname, q.qnameLen) == blocklist::MatchResult::kBlocked;
     clients_.record(clientIpv4, blocked);
     if (stats_) {
-      uint32_t now    = millis();
-      uint8_t  hourIdx = static_cast<uint8_t>((now / 3600000UL) % 24);
+      uint32_t now = millis();
+      uint8_t hourIdx = static_cast<uint8_t>((now / 3600000UL) % 24);
       stats_->record(q.qname, q.qnameLen, clientIpv4, blocked, now, hourIdx);
     }
     return blocked ? dns::PolicyAction::kBlock : dns::PolicyAction::kForward;
+  }
+
+  // CNAME cloaking: the query was let through as allowed, but its answer points at a
+  // blocked name. Count it as blocked instead (the caller sends the block reply).
+  bool blockedCname(const dns::Query& q, uint32_t clientIpv4, const char* target, size_t len) override {
+    if ((ntohl(clientIpv4) >> 24) == 127) return false;
+    if (!clients_.blockingOn()) return false;
+    if (!blocklist_.matcher().cnameBlocked(q.qname, q.qnameLen, target, len)) return false;
+    clients_.reclassifyBlocked(clientIpv4);
+    if (stats_) {
+      const uint32_t now = millis();
+      stats_->reclassifyBlocked(q.qname, q.qnameLen, clientIpv4, now,
+                                static_cast<uint8_t>((now / 3600000UL) % 24));
+    }
+    return true;
   }
 
  private:

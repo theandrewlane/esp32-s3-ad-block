@@ -382,6 +382,26 @@ bool inspectResponse(const uint8_t* msg, size_t len, ResponseInfo& info) {
   return true;
 }
 
+bool anyCnameTarget(const uint8_t* msg, size_t len, CnameVisitor fn, void* ctx) {
+  if (len < kHeaderSize || !(readU16Be(msg + 2) & flag::kQr)) return false;
+  const uint16_t an = readU16Be(msg + 6);
+  size_t pos = questionEnd(msg, len);
+  if (pos == 0) return false;
+  char target[kMaxNameText + 1];
+  size_t seen = 0;
+  for (uint16_t i = 0; i < an; i++) {
+    Rr rr;
+    if (!readRr(msg, len, pos, rr)) return false;
+    if (rr.type == kTypeCname) {
+      if (++seen > kMaxCnameChain) return false;
+      const int n = decodeName(msg, rr.end, rr.rdata, target);
+      if (n > 0 && fn(ctx, target, static_cast<size_t>(n))) return true;
+    }
+    pos = rr.end;
+  }
+  return false;
+}
+
 bool responseMatches(const uint8_t* msg, size_t len, uint16_t id, const Query& q) {
   if (len < kHeaderSize || !q.hasQuestion) return false;
   if (readU16Be(msg) != id) return false;

@@ -159,6 +159,22 @@ void DnsService::upstreamTaskEntry(void* self) {
 // --------------------------------------------------------------------------------
 // Shared pipeline (dns_io and dns_tcp)
 
+bool DnsService::cloaked(const dns::Query& q, const struct sockaddr_in& client, const uint8_t* answer,
+                         size_t len) {
+  struct Ctx {
+    dns::IQueryPolicy* policy;
+    const dns::Query* q;
+    uint32_t ip;
+  } c{&policy_, &q, client.sin_addr.s_addr};
+  return dns::anyCnameTarget(
+      answer, len,
+      [](void* ctx, const char* target, size_t n) {
+        const Ctx* x = static_cast<const Ctx*>(ctx);
+        return x->policy->blockedCname(*x->q, x->ip, target, n);
+      },
+      &c);
+}
+
 size_t DnsService::processQuery(const uint8_t* pkt, size_t len, const ClientRef& client, uint8_t* scratch,
                                 size_t scratchCap, uint8_t* out, size_t outCap, bool* forwarded) {
   if (forwarded) *forwarded = false;
@@ -216,6 +232,13 @@ size_t DnsService::processQuery(const uint8_t* pkt, size_t len, const ClientRef&
     n = cache_->lookup(q, scratch, scratchCap);
   }
   if (n) {
+    if (cloaked(q, client.addr, scratch, n)) {  // the cached answer now hits a blocked CNAME
+      dns::BlockedReplyOptions opt;
+      opt.ttl = cfg_.blockedTtl;
+      stats_.blocked++;
+      stats_.cnameBlocked++;
+      return dns::buildBlockedReply(q, opt, out, outCap);
+    }
     dns::ClientReplyOptions co;
     co.authenticatedUpstream = cfg_.passAd;  // only authenticated answers are cached
     co.sizeLimit = sizeLimit;
@@ -459,6 +482,17 @@ void DnsService::onAnswer(uint32_t token, const dns::Query& q, const uint8_t* an
     cache_->insert(q, answer, len, info);
   }
   Pending& p = pool_[token];
+  if (cloaked(q, p.client.addr, answer, len)) {
+    dns::BlockedReplyOptions opt;
+    opt.ttl = cfg_.blockedTtl;
+    stats_.blocked++;
+    stats_.cnameBlocked++;
+    p.replyLen = static_cast<uint16_t>(dns::buildBlockedReply(q, opt, p.reply, cfg_.replyCap));
+    if (p.replyLen) {
+      completeSlot(static_cast<uint16_t>(token));
+      return;
+    }
+  }
   dns::ClientReplyOptions co;
   co.authenticatedUpstream = authenticated && cfg_.passAd;
   co.sizeLimit = p.client.origin == Origin::kTcp ? cfg_.replyCap : q.udpReplyLimit();
@@ -535,6 +569,7 @@ DnsStats DnsService::stats() const {
   s.queries = stats_.queries.load();
   s.tcpQueries = stats_.tcpQueries.load();
   s.blocked = stats_.blocked.load();
+  s.cnameBlocked = stats_.cnameBlocked.load();
   s.local = stats_.local.load();
   s.cacheHits = stats_.cacheHits.load();
   s.forwarded = stats_.forwarded.load();

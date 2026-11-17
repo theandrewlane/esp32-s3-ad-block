@@ -23,6 +23,11 @@ void Matcher::setCustom(DomainSet block, DomainSet allow) {
   customAllow_ = std::move(allow);
 }
 
+bool Matcher::cnameBlocked(const char* qname, size_t qlen, const char* target, size_t tlen) const {
+  if (match(qname, qlen) == MatchResult::kAllowed) return false;
+  return match(target, tlen) == MatchResult::kBlocked;
+}
+
 MatchResult Matcher::match(const char* name, size_t len) const {
   if (len == 0) return MatchResult::kNone;
   {

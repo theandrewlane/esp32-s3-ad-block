@@ -37,6 +37,11 @@ class Matcher {
   // `name`: lowercase, no trailing dot. Allocation-free.
   MatchResult match(const char* name, size_t len) const;
 
+  // CNAME cloaking: true if `target` (a CNAME target in the answer for `qname`) is
+  // blocked. A name the user explicitly allowed is never blocked through its CNAME,
+  // so `allow metrics.mysite.com` keeps working even when it points at a tracker.
+  bool cnameBlocked(const char* qname, size_t qlen, const char* target, size_t tlen) const;
+
  private:
   const IndexHolder& index_;
   mutable std::mutex customMutex_;

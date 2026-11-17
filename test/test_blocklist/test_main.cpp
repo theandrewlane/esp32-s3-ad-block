@@ -217,6 +217,29 @@ static void test_custom_allow_overrides_blocklist_and_custom_block_adds() {
   TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kBlocked), static_cast<int>(f.m("x.extra.org")));
 }
 
+static void test_cname_blocked_when_target_is_listed() {
+  MatchFixture f({"tracker-cdn.net"});
+  auto cb = [&](const char* q, const char* t) { return f.matcher.cnameBlocked(q, strlen(q), t, strlen(t)); };
+  TEST_ASSERT_TRUE(cb("metrics.mysite.com", "mysite.tracker-cdn.net"));  // cloaked tracker
+  TEST_ASSERT_FALSE(cb("metrics.mysite.com", "cdn.fine.org"));           // harmless CNAME
+  TEST_ASSERT_FALSE(cb("metrics.mysite.com", ""));                       // nothing to check
+}
+
+static void test_cname_blocking_respects_allow_and_custom_rules() {
+  MatchFixture f({"tracker-cdn.net"});
+  DomainSet allow, block;
+  allow.add("metrics.mysite.com", 18);  // the user trusts this first-party name
+  allow.finalize();
+  block.add("evil-cname.org", 14);
+  block.finalize();
+  f.matcher.setCustom(std::move(block), std::move(allow));
+  auto cb = [&](const char* q, const char* t) { return f.matcher.cnameBlocked(q, strlen(q), t, strlen(t)); };
+  TEST_ASSERT_FALSE(cb("metrics.mysite.com", "mysite.tracker-cdn.net"));  // allowed query name wins
+  TEST_ASSERT_TRUE(cb("other.mysite.com", "mysite.tracker-cdn.net"));     // a sibling is still caught
+  TEST_ASSERT_TRUE(cb("x.example.com", "a.evil-cname.org"));              // custom block rules apply
+  TEST_ASSERT_FALSE(cb("x.example.com", "tracker-cdn.net.fake"));         // no accidental suffix match
+}
+
 static void test_collision_overblocks_and_allowlist_fixes_it() {
   // A hash collision makes an innocent name look listed. Simulate it by listing the
   // innocent name's hash under a "different" entry; the allowlist must rescue it.
@@ -281,6 +304,8 @@ int main(int, char**) {
   RUN_TEST(test_parent_domain_matching);
   RUN_TEST(test_bare_tld_is_never_matched_and_www_is_not_stripped);
   RUN_TEST(test_custom_allow_overrides_blocklist_and_custom_block_adds);
+  RUN_TEST(test_cname_blocked_when_target_is_listed);
+  RUN_TEST(test_cname_blocking_respects_allow_and_custom_rules);
   RUN_TEST(test_collision_overblocks_and_allowlist_fixes_it);
   RUN_TEST(test_empty_holder_blocks_nothing);
   RUN_TEST(test_publish_while_readers_run_never_uses_freed_index);

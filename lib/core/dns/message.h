@@ -189,6 +189,13 @@ struct ResponseInfo {
 // Walks a response; false if it is malformed, not a response, or QDCOUNT != 1.
 bool inspectResponse(const uint8_t* msg, size_t len, ResponseInfo& info);
 
+// Calls fn(ctx, target, len) with the lowercase dotted target of every CNAME record in
+// the ANSWER section (at most kMaxCnameChain of them) until fn returns true. Returns
+// whether fn returned true. A malformed message stops the walk and returns false.
+using CnameVisitor = bool (*)(void* ctx, const char* target, size_t len);
+constexpr size_t kMaxCnameChain = 16;
+bool anyCnameTarget(const uint8_t* msg, size_t len, CnameVisitor fn, void* ctx);
+
 // True if `msg` is a response to `q` sent with upstream ID `id` (ID + question match).
 bool responseMatches(const uint8_t* msg, size_t len, uint16_t id, const Query& q);
 

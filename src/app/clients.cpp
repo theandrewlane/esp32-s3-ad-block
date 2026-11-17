@@ -104,6 +104,16 @@ void ClientTable::record(uint32_t ip, bool blocked) {
   }
 }
 
+void ClientTable::reclassifyBlocked(uint32_t ip) {
+  platform::LockGuard g(mutex_);
+  if (totalAllowed_) totalAllowed_--;
+  totalBlocked_++;
+  if (Entry* e = find(ip, false)) {
+    if (e->info.allowed) e->info.allowed--;
+    e->info.blocked++;
+  }
+}
+
 bool ClientTable::blockingOn() {
   platform::LockGuard g(mutex_);
   return pause_.blockingOn(nowMs());

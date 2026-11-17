@@ -310,9 +310,10 @@ void Dashboard::handleStats() {
   j += ",\"blocking\":" + String(b(ctx_.clients->blockingOn())) +
        ",\"resumeIn\":" + String(ctx_.clients->resumeInSeconds());
   j += ",\"dns\":{\"queries\":" + String(d.queries) + ",\"tcp\":" + String(d.tcpQueries) +
-       ",\"blocked\":" + String(d.blocked) + ",\"local\":" + String(d.local) +
-       ",\"cacheHits\":" + String(d.cacheHits) + ",\"forwarded\":" + String(d.forwarded) +
-       ",\"servfail\":" + String(d.servfail) + ",\"cacheEntries\":" + String(cs.entries) + "}";
+       ",\"blocked\":" + String(d.blocked) + ",\"cnameBlocked\":" + String(d.cnameBlocked) +
+       ",\"local\":" + String(d.local) + ",\"cacheHits\":" + String(d.cacheHits) +
+       ",\"forwarded\":" + String(d.forwarded) + ",\"servfail\":" + String(d.servfail) +
+       ",\"cacheEntries\":" + String(cs.entries) + "}";
   j += ",\"plainFallback\":" + String(b(us.plainFallback)) + ",\"upstreams\":[";
   for (size_t i = 0; i < us.count; i++) {
     const upstream::UpstreamStatus& u = us.status[i];

@@ -68,6 +68,35 @@ size_t skipName(const uint8_t* pkt, size_t len, size_t off) {
   }
 }
 
+int decodeName(const uint8_t* pkt, size_t len, size_t off, char* textOut) {
+  size_t i = off;
+  size_t text = 0;
+  int hops = 0;
+  while (true) {
+    if (i >= len) return -1;
+    const uint8_t l = pkt[i];
+    if ((l & 0xC0) == 0xC0) {
+      if (i + 2 > len || ++hops > kMaxPointerHops) return -1;
+      i = static_cast<size_t>(((l & 0x3F) << 8) | pkt[i + 1]);
+      continue;
+    }
+    if (l & 0xC0) return -1;
+    if (l == 0) {
+      textOut[text] = 0;
+      return static_cast<int>(text);
+    }
+    if (l > kMaxLabel || i + 1 + l > len) return -1;
+    if (text + (text ? 1 : 0) + l > kMaxNameText) return -1;
+    if (text) textOut[text++] = '.';
+    for (uint8_t k = 0; k < l; k++) {
+      const uint8_t c = asciiLower(pkt[i + 1 + k]);
+      if (!isLabelByte(c)) return -1;
+      textOut[text++] = static_cast<char>(c);
+    }
+    i += 1 + l;
+  }
+}
+
 bool nameEquals(const uint8_t* pkt, size_t len, size_t off, const uint8_t* wire, size_t wireLen) {
   size_t i = off;
   size_t w = 0;

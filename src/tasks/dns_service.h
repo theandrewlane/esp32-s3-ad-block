@@ -62,6 +62,7 @@ struct DnsStats {
   uint32_t queries = 0;
   uint32_t tcpQueries = 0;
   uint32_t blocked = 0;
+  uint32_t cnameBlocked = 0;  // subset of `blocked`: answer pointed at a blocked CNAME target
   uint32_t local = 0;
   uint32_t cacheHits = 0;
   uint32_t forwarded = 0;
@@ -140,6 +141,8 @@ class DnsService : private upstream::IForwarderSink {
   void tcpProcessBuffered(uint8_t i);
   void tcpClose(uint8_t i);
   bool tcpWrite(uint8_t i, const uint8_t* msg, size_t len);
+  // CNAME cloaking: true if any CNAME target in `answer` is blocked for this client.
+  bool cloaked(const dns::Query& q, const struct sockaddr_in& client, const uint8_t* answer, size_t len);
   void completeSlot(uint16_t idx);  // upstream task: route reply + wake the owner
   void publishSnapshot();
 
@@ -180,8 +183,8 @@ class DnsService : private upstream::IForwarderSink {
   TcpConn tcp_[8];
 
   struct AtomicStats {
-    std::atomic<uint32_t> queries{0}, tcpQueries{0}, blocked{0}, local{0}, cacheHits{0}, forwarded{0},
-        servfail{0}, errors{0}, dropped{0};
+    std::atomic<uint32_t> queries{0}, tcpQueries{0}, blocked{0}, cnameBlocked{0}, local{0}, cacheHits{0},
+        forwarded{0}, servfail{0}, errors{0}, dropped{0};
   } stats_;
 
   mutable platform::Mutex snapshotMutex_;

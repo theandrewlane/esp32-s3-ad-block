@@ -11,6 +11,11 @@ All notable changes to this project are documented here. The format follows
 - On-device display dashboard: queries-per-minute graph (allowed and blocked, last 30
   minutes), traffic and resolution tiles (cache, forwarded, local), latency tile and a
   system uptime clock. Backlight is 10% from 23:00 to 07:00 local time, 80% otherwise.
+- CNAME-cloaking protection: an answer whose CNAME chain reaches a blocked name (a
+  tracker hidden behind a first-party hostname such as `metrics.example.com`) is replaced
+  by the block reply, for fresh upstream answers and cache hits alike. A name on your
+  allowlist is never blocked through its CNAME. The dashboard status reports the count
+  as `dns.cnameBlocked`.
 
 ### Changed
 

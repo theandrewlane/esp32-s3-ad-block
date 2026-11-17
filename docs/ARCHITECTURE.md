@@ -180,6 +180,14 @@ flowchart LR
 4. Blocked/local replies are built in place and sent immediately.
 5. Allowed names are looked up in the **response cache**. Hits are served
    immediately with the client's id, decremented TTLs and fresh EDNS.
+   **CNAME-cloaking check:** before an answer is sent (upstream answers in `dns_up`,
+   cache hits in `dns_io`/`dns_tcp`), every CNAME target in its answer section
+   (`dns::anyCnameTarget`, at most 16) is passed to `IQueryPolicy::blockedCname`. If
+   the matcher blocks one, and the query name itself is not allowlisted, the whole
+   answer is replaced by the normal block reply and the query is reclassified as
+   blocked in the stats (`dns.cnameBlocked`). The cache keeps the raw answer, so a
+   blocklist update also covers names that were cached before it. Nothing is allocated:
+   the target is decoded into a 254-byte stack buffer.
 6. Misses are copied into a fixed slot of the **query pool** and the slot index is
    posted to the **upstream queue**. `dns_io` returns to `select()` at once.
 7. `dns_up` drains the queue, sends queries through the active transport

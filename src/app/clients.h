@@ -35,6 +35,8 @@ class ClientTable {
   // Returns true if the client is banned (creating its entry on first sight).
   bool checkBanned(uint32_t ip);
   void record(uint32_t ip, bool blocked);
+  // A query already recorded as allowed turned out blocked (CNAME cloaking).
+  void reclassifyBlocked(uint32_t ip);
   bool blockingOn();
 
   // Web / maintenance -------------------------------------------------------------

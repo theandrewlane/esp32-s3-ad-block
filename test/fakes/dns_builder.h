@@ -94,6 +94,41 @@ class ResponseBuilder {
     rr(6, 1, ttl, {a, b, c, d});
     return *this;
   }
+  // CNAME owned by the question name; the target is written uncompressed.
+  ResponseBuilder& answerCname(uint32_t ttl, const std::string& target) {
+    Bytes rd;
+    putName(rd, target);
+    rr(6, 5, ttl, rd);
+    return *this;
+  }
+  // CNAME owned by `owner` (a chain link), owner and target written uncompressed.
+  ResponseBuilder& answerCnameFrom(const std::string& owner, uint32_t ttl, const std::string& target) {
+    Bytes name;
+    putName(name, owner);
+    b_.insert(b_.end(), name.begin(), name.end());
+    put16(b_, 5);
+    put16(b_, 1);
+    put32(b_, ttl);
+    Bytes rd;
+    putName(rd, target);
+    put16(b_, static_cast<uint16_t>(rd.size()));
+    b_.insert(b_.end(), rd.begin(), rd.end());
+    bump(6);
+    return *this;
+  }
+  // CNAME whose target is a compression pointer to the question name (offset 12).
+  ResponseBuilder& answerCnameToQname(const std::string& owner, uint32_t ttl) {
+    Bytes name;
+    putName(name, owner);
+    b_.insert(b_.end(), name.begin(), name.end());
+    put16(b_, 5);
+    put16(b_, 1);
+    put32(b_, ttl);
+    put16(b_, 2);
+    put16(b_, 0xC00C);
+    bump(6);
+    return *this;
+  }
   ResponseBuilder& answerTxt(uint32_t ttl, size_t textLen) {
     Bytes rd;
     while (textLen > 0) {

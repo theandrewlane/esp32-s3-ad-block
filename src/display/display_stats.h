@@ -46,6 +46,11 @@ class DisplayStats {
   void record(const char* qname, uint8_t qnameLen, uint32_t clientIp, bool blocked,
               uint32_t timeMs, uint8_t hourIdx);
 
+  // The latest recorded query for (qname, clientIp) was counted as allowed but turned
+  // out blocked (CNAME cloaking): move it to the blocked side of every counter.
+  void reclassifyBlocked(const char* qname, uint8_t qnameLen, uint32_t clientIp, uint32_t timeMs,
+                         uint8_t hourIdx);
+
   // Snapshot accessors — called from display task only.
   void copyLog(QueryEvent out[kLogCapacity], size_t* count) const;
   void copyHourly(HourlyBucket out[kHourlyBuckets]) const;

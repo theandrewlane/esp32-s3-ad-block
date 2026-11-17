@@ -29,6 +29,12 @@ NameParse parseUncompressedName(const uint8_t* pkt, size_t len, size_t off, uint
 // the original byte stream, or 0 if the name is malformed or runs past len.
 size_t skipName(const uint8_t* pkt, size_t len, size_t off);
 
+// Decodes a possibly compressed name at pkt[off] into lowercase dotted text (no trailing
+// dot, NUL-terminated; textOut needs kMaxNameText + 1 bytes). Pointer chains are followed
+// with a hop limit. Returns the text length, or -1 if the name is malformed, too long or
+// has a byte outside printable ASCII. The root name yields 0.
+int decodeName(const uint8_t* pkt, size_t len, size_t off, char* textOut);
+
 // Compares a possibly compressed name at pkt[off] with an uncompressed lowercase wire
 // name, ignoring ASCII case. Pointer chains are followed with a hop limit.
 bool nameEquals(const uint8_t* pkt, size_t len, size_t off, const uint8_t* wire, size_t wireLen);

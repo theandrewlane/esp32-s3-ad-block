@@ -438,6 +438,119 @@ static void test_finalize_truncates_oversized_udp_answer() {
 
 // Truncations and random byte flips of valid packets must never read out of bounds
 // (run under AddressSanitizer in the native env) and never yield inconsistent output.
+// --- name decoding and the CNAME walk (CNAME-cloaking protection) ------------------
+
+static void test_decode_name_plain_and_compressed() {
+  Bytes b;
+  put16(b, 0);  // padding so offsets are not 0
+  putName(b, "Ads.Tracker.NET");
+  char text[dns::kMaxNameText + 1];
+  TEST_ASSERT_EQUAL(15, dns::decodeName(b.data(), b.size(), 2, text));
+  TEST_ASSERT_EQUAL_STRING("ads.tracker.net", text);
+
+  const size_t ptrAt = b.size();
+  b.push_back(3);
+  b.push_back('w');
+  b.push_back('w');
+  b.push_back('w');
+  put16(b, 0xC000 | 2);  // www + pointer to ads.tracker.net
+  TEST_ASSERT_EQUAL(19, dns::decodeName(b.data(), b.size(), ptrAt, text));
+  TEST_ASSERT_EQUAL_STRING("www.ads.tracker.net", text);
+
+  const uint8_t root[] = {0};
+  TEST_ASSERT_EQUAL(0, dns::decodeName(root, 1, 0, text));
+  TEST_ASSERT_EQUAL_STRING("", text);
+}
+
+static void test_decode_name_rejects_loops_overlong_and_bad_bytes() {
+  char text[dns::kMaxNameText + 1];
+  const uint8_t loop[] = {0xC0, 0x00};  // points at itself
+  TEST_ASSERT_EQUAL(-1, dns::decodeName(loop, sizeof(loop), 0, text));
+  const uint8_t trunc[] = {5, 'a', 'b'};
+  TEST_ASSERT_EQUAL(-1, dns::decodeName(trunc, sizeof(trunc), 0, text));
+  const uint8_t badByte[] = {3, 'a', 0x01, 'c', 0};
+  TEST_ASSERT_EQUAL(-1, dns::decodeName(badByte, sizeof(badByte), 0, text));
+  const uint8_t reserved[] = {0x40, 0};
+  TEST_ASSERT_EQUAL(-1, dns::decodeName(reserved, sizeof(reserved), 0, text));
+  Bytes longName;  // 5 labels of 63 chars = 319 chars of text
+  for (int i = 0; i < 5; i++) {
+    longName.push_back(63);
+    longName.insert(longName.end(), 63, 'a');
+  }
+  longName.push_back(0);
+  TEST_ASSERT_EQUAL(-1, dns::decodeName(longName.data(), longName.size(), 0, text));
+}
+
+struct CnameCollector {
+  std::vector<std::string> seen;
+  std::string stopAt;
+};
+
+static bool collectCname(void* ctx, const char* target, size_t len) {
+  auto* c = static_cast<CnameCollector*>(ctx);
+  c->seen.emplace_back(target, len);
+  return !c->stopAt.empty() && c->seen.back() == c->stopAt;
+}
+
+static void test_cname_walk_visits_every_target_in_a_chain() {
+  const Bytes r = ResponseBuilder(1, "metrics.mysite.com", 1)
+                      .answerCname(300, "mysite.tracker-cdn.net")
+                      .answerCnameFrom("mysite.tracker-cdn.net", 300, "edge.Real-Tracker.com")
+                      .answerA(60, 1, 2, 3, 4)
+                      .build();
+  CnameCollector c;
+  TEST_ASSERT_FALSE(dns::anyCnameTarget(r.data(), r.size(), collectCname, &c));
+  TEST_ASSERT_EQUAL(2, static_cast<int>(c.seen.size()));
+  TEST_ASSERT_EQUAL_STRING("mysite.tracker-cdn.net", c.seen[0].c_str());
+  TEST_ASSERT_EQUAL_STRING("edge.real-tracker.com", c.seen[1].c_str());  // lowercased
+}
+
+static void test_cname_walk_stops_when_visitor_says_so() {
+  const Bytes r = ResponseBuilder(1, "a.example.com", 1)
+                      .answerCname(300, "first.net")
+                      .answerCnameFrom("first.net", 300, "second.net")
+                      .answerCnameFrom("second.net", 300, "third.net")
+                      .build();
+  CnameCollector c;
+  c.stopAt = "second.net";
+  TEST_ASSERT_TRUE(dns::anyCnameTarget(r.data(), r.size(), collectCname, &c));
+  TEST_ASSERT_EQUAL(2, static_cast<int>(c.seen.size()));  // third.net never visited
+}
+
+static void test_cname_walk_ignores_non_cname_and_handles_malformed() {
+  CnameCollector c;
+  const Bytes plain = ResponseBuilder(1, "a.example.com", 1).answerA(60, 1, 2, 3, 4).build();
+  TEST_ASSERT_FALSE(dns::anyCnameTarget(plain.data(), plain.size(), collectCname, &c));
+  TEST_ASSERT_TRUE(c.seen.empty());
+
+  const Bytes ptr = ResponseBuilder(1, "a.example.com", 1).answerCnameToQname("x.example.com", 60).build();
+  TEST_ASSERT_FALSE(dns::anyCnameTarget(ptr.data(), ptr.size(), collectCname, &c));
+  TEST_ASSERT_EQUAL(1, static_cast<int>(c.seen.size()));
+  TEST_ASSERT_EQUAL_STRING("a.example.com", c.seen[0].c_str());  // pointer was decompressed
+
+  // Truncated anywhere: never crashes, never reads past the end, reports no match.
+  const Bytes full = ResponseBuilder(1, "a.example.com", 1).answerCname(60, "b.net").build();
+  for (size_t cut = 0; cut < full.size(); cut++) {
+    CnameCollector t;
+    TEST_ASSERT_FALSE(dns::anyCnameTarget(full.data(), cut, collectCname, &t));
+  }
+  // A query (QR=0) is not a response.
+  const Bytes query = makeQuery("a.example.com", 1);
+  TEST_ASSERT_FALSE(dns::anyCnameTarget(query.data(), query.size(), collectCname, &c));
+  // More CNAMEs than kMaxCnameChain: the walk gives up instead of looping on garbage.
+  ResponseBuilder many(1, "a.example.com", 1);
+  std::string prev = "a.example.com";
+  for (size_t i = 0; i < dns::kMaxCnameChain + 4; i++) {
+    std::string next = "h" + std::to_string(i) + ".net";
+    many.answerCnameFrom(prev, 60, next);
+    prev = next;
+  }
+  const Bytes m = many.build();
+  CnameCollector mc;
+  TEST_ASSERT_FALSE(dns::anyCnameTarget(m.data(), m.size(), collectCname, &mc));
+  TEST_ASSERT_EQUAL(static_cast<int>(dns::kMaxCnameChain), static_cast<int>(mc.seen.size()));
+}
+
 static void test_fuzz_parsers_on_mutated_packets() {
   FakeRandom rnd;
   QueryOpts o;
@@ -502,6 +615,11 @@ int main(int, char**) {
   RUN_TEST(test_ttl_above_2_pow_31_is_treated_as_zero);
   RUN_TEST(test_finalize_restores_id_and_applies_ad_policy);
   RUN_TEST(test_finalize_truncates_oversized_udp_answer);
+  RUN_TEST(test_decode_name_plain_and_compressed);
+  RUN_TEST(test_decode_name_rejects_loops_overlong_and_bad_bytes);
+  RUN_TEST(test_cname_walk_visits_every_target_in_a_chain);
+  RUN_TEST(test_cname_walk_stops_when_visitor_says_so);
+  RUN_TEST(test_cname_walk_ignores_non_cname_and_handles_malformed);
   RUN_TEST(test_fuzz_parsers_on_mutated_packets);
   return UNITY_END();
 }

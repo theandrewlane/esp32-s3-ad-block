@@ -40,6 +40,33 @@ void DisplayStats::record(const char* qname, uint8_t qnameLen, uint32_t clientIp
   if (blocked) updateTop(ev.domain);
 }
 
+void DisplayStats::reclassifyBlocked(const char* qname, uint8_t qnameLen, uint32_t clientIp,
+                                     uint32_t timeMs, uint8_t hourIdx) {
+  platform::LockGuard lock(mutex_);
+  const size_t cmpLen = std::min<size_t>(qnameLen, sizeof(log_[0].domain) - 1);
+  // Newest first: the query was recorded moments ago.
+  for (size_t n = 0; n < logCount_; ++n) {
+    QueryEvent& ev = log_[(logHead_ + kLogCapacity - 1 - n) % kLogCapacity];
+    if (!ev.blocked && ev.clientIp == clientIp && strlen(ev.domain) == cmpLen &&
+        memcmp(ev.domain, qname, cmpLen) == 0) {
+      ev.blocked = true;
+      break;
+    }
+  }
+  ++hourly_[hourIdx % kHourlyBuckets].blocked;
+  const uint32_t minute = timeMs / 60000UL;
+  const size_t mi = minute % kMinuteBuckets;
+  if (minuteUsed_[mi] && minuteId_[mi] == minute) {
+    if (minutes_[mi].allowed) --minutes_[mi].allowed;
+    ++minutes_[mi].blocked;
+  }
+  char domain[sizeof(topDomains_[0].name)];
+  const size_t n = std::min<size_t>(qnameLen, sizeof(domain) - 1);
+  memcpy(domain, qname, n);
+  domain[n] = '\0';
+  updateTop(domain);
+}
+
 void DisplayStats::updateTop(const char* domain) {
   // Linear search through topCount_ entries; N <= 10, negligible cost.
   for (size_t i = 0; i < topCount_; ++i) {
