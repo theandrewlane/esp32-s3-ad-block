@@ -61,6 +61,11 @@ Code: `lib/core/sched/daily_scheduler.*`, `lib/core/update/updater.*`, wired up 
 `bl_url`, `bl_hour`, `bl_min`, `bl_etag`, `sch_last`). HTTPS client:
 `src/platform/esp_http.*` (esp_http_client + CA bundle, manual redirects, ETag).
 
+Custom rule syntax is parsed by `lib/core/blocklist/rules.*` (`parseRule`, `globMatch`)
+and stored in `RuleSet`s (`matcher.*`): `domain`, `*.domain` (subdomains only), globs
+(`*`, `?`; ≤ 64, ≥ 4 literals), `||d^`, `@@` allow prefix, hosts lines. Keep glob
+matching linear and allocation-free (it runs on the DNS hot path).
+
 1. Wait for NTP sync (and a plausible year). Timezone from config (POSIX TZ, default `UTC0`).
 2. Due when local time ≥ 02:00 + jitter (0–10 min) and the last success date ≠
    today (stored in NVS: no double runs across reboots).

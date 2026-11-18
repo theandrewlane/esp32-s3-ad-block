@@ -71,7 +71,9 @@ class BlocklistManager final : public update::IListInstaller {
   bool saveRules(bool allow);
   void rebuildSets();
   void record(const update::UpdateReport& r);
-  static bool normalise(const String& in, String& out);
+  // Canonical text of a rule (see blocklist/rules.h); false if it is not a valid rule.
+  // `allowPrefix` reports an Adblock "@@" prefix.
+  static bool normalise(const String& in, String& out, bool* allowPrefix = nullptr);
 
   hal::IFileSystem& fs_;
   hal::IKeyValueStore& kv_;

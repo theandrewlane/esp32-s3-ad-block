@@ -16,6 +16,11 @@ All notable changes to this project are documented here. The format follows
   by the block reply, for fresh upstream answers and cache hits alike. A name on your
   allowlist is never blocked through its CNAME. The dashboard status reports the count
   as `dns.cnameBlocked`.
+- Smarter custom rules: `*.example.com` blocks subdomains only (not the apex), globs
+  such as `ads*.example.com` (`*` any run, `?` one character; at most 64 per list, 4+
+  literal characters) match the name and its parents, and Adblock `||example.com^`
+  (modifiers ignored), `@@||example.com^` (allow) and hosts-file lines
+  (`0.0.0.0 example.com`) are accepted in the rule boxes. Allow rules still win.
 
 ### Changed
 

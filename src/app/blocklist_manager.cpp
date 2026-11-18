@@ -189,18 +189,12 @@ void BlocklistManager::setTime(uint8_t hour, uint8_t minute) {
   scheduler_.setTime(hour, minute);
 }
 
-bool BlocklistManager::normalise(const String& in, String& out) {
-  out = in;
-  out.trim();
-  out.toLowerCase();
-  while (out.startsWith("*.") || out.startsWith(".")) out.remove(0, out.startsWith("*.") ? 2 : 1);
-  while (out.endsWith(".")) out.remove(out.length() - 1);
-  if (out.length() < 3 || out.length() > 253 || out.indexOf('.') <= 0) return false;
-  for (size_t i = 0; i < out.length(); i++) {
-    const char c = out[i];
-    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_')) return false;
-  }
-  return out.indexOf("..") < 0;
+bool BlocklistManager::normalise(const String& in, String& out, bool* allowPrefix) {
+  const blocklist::ParsedRule r = blocklist::parseRule(in.c_str(), in.length());
+  if (r.kind == blocklist::RuleKind::kInvalid) return false;
+  out = r.text.c_str();
+  if (allowPrefix) *allowPrefix = r.allow;
+  return true;
 }
 
 void BlocklistManager::loadRules() {
@@ -237,22 +231,48 @@ bool BlocklistManager::saveRules(bool allow) {
 }
 
 void BlocklistManager::rebuildSets() {
-  blocklist::DomainSet block, allow;
-  for (const String& d : block_) block.add(d.c_str(), d.length());
-  for (const String& d : allow_) allow.add(d.c_str(), d.length());
+  blocklist::RuleSet block, allow;
+  for (int pass = 0; pass < 2; pass++) {
+    blocklist::RuleSet& set = pass ? allow : block;
+    for (const String& d : pass ? allow_ : block_) {
+      const blocklist::ParsedRule r = blocklist::parseRule(d.c_str(), d.length());
+      switch (r.kind) {
+        case blocklist::RuleKind::kDomain: set.addDomain(r.text.data(), r.text.size()); break;
+        case blocklist::RuleKind::kSubdomains:  // stored as "*.name"
+          set.addSubdomains(r.text.data() + 2, r.text.size() - 2);
+          break;
+        case blocklist::RuleKind::kGlob: set.addGlob(r.text.data(), r.text.size()); break;
+        case blocklist::RuleKind::kInvalid: break;
+      }
+    }
+  }
   block.finalize();
   allow.finalize();
   matcher_.setCustom(std::move(block), std::move(allow));
 }
 
+namespace {
+bool isGlob(const String& rule) {
+  return blocklist::parseRule(rule.c_str(), rule.length()).kind == blocklist::RuleKind::kGlob;
+}
+}  // namespace
+
 bool BlocklistManager::addRule(bool allow, const String& domain) {
   String d;
-  if (!normalise(domain, d)) return false;
+  bool allowPrefix = false;
+  if (!normalise(domain, d, &allowPrefix)) return false;
+  if (allowPrefix) allow = true;  // "@@||example.com^" always means the allowlist
   platform::LockGuard g(stateMutex_);
   std::vector<String>& list = allow ? allow_ : block_;
   for (const String& x : list)
     if (x == d) return true;
   if (list.size() >= kMaxRules) return false;
+  if (isGlob(d)) {
+    size_t globs = 0;
+    for (const String& x : list)
+      if (isGlob(x)) globs++;
+    if (globs >= blocklist::kMaxGlobsPerList) return false;
+  }
   list.push_back(d);
   saveRules(allow);
   rebuildSets();

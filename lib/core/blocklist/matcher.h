@@ -6,9 +6,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "blocklist/index.h"
+#include "blocklist/rules.h"
 
 namespace blocklist {
 
@@ -25,6 +28,28 @@ class DomainSet {
   std::vector<uint64_t> hashes_;
 };
 
+// One custom list (block or allow): domain rules, subdomain-only rules and globs.
+// Not thread-safe by itself; Matcher swaps whole sets under its lock.
+class RuleSet {
+ public:
+  RuleSet() = default;
+  RuleSet(DomainSet domains) : domains_(std::move(domains)) {}  // NOLINT: implicit on purpose
+
+  void addDomain(const char* name, size_t len) { domains_.add(name, len); }
+  void addSubdomains(const char* name, size_t len) { subdomains_.add(name, len); }
+  // False (and nothing added) once kMaxGlobsPerList patterns are stored.
+  bool addGlob(const char* pattern, size_t len);
+  void finalize();  // sort + dedupe the hash sets; call after adding
+  size_t size() const { return domains_.size() + subdomains_.size() + globs_.size(); }
+  size_t globCount() const { return globs_.size(); }
+  bool matches(const char* name, size_t len) const;
+
+ private:
+  DomainSet domains_;
+  DomainSet subdomains_;
+  std::vector<std::string> globs_;
+};
+
 enum class MatchResult { kNone, kBlocked, kAllowed };
 
 class Matcher {
@@ -32,7 +57,7 @@ class Matcher {
   explicit Matcher(const IndexHolder& index) : index_(index) {}
 
   // Replaces both custom sets at once (web task). Lookups never see a half-update.
-  void setCustom(DomainSet block, DomainSet allow);
+  void setCustom(RuleSet block, RuleSet allow);
 
   // `name`: lowercase, no trailing dot. Allocation-free.
   MatchResult match(const char* name, size_t len) const;
@@ -45,8 +70,8 @@ class Matcher {
  private:
   const IndexHolder& index_;
   mutable std::mutex customMutex_;
-  DomainSet customBlock_;
-  DomainSet customAllow_;
+  RuleSet customBlock_;
+  RuleSet customAllow_;
 };
 
 // Calls fn(hash) for the name and each parent with at least two labels; stops early

@@ -410,6 +410,13 @@ DO bit echoed, and the extended RCODE recomputed. Upstream queries carry our own
   Allowing `x.example.com` exempts that name and its subdomains even if a parent
   is listed. This fixes upstream's limitation that `@@` cannot carve out a
   subdomain.
+  Accepted rule forms (`lib/core/blocklist/rules.*`): a plain domain (name and
+  subdomains), `*.domain` (subdomains only), globs with `*`/`?` (≤ 64 per list, ≤ 100
+  characters, ≥ 4 literal characters; matched in linear time against the name and each
+  parent suffix), Adblock `||d^` (modifiers ignored), `@@` prefix (routes the rule to
+  the allow list) and hosts lines. Plain and `*.` rules live in the sorted hash sets;
+  globs are a small separate list checked after them. A name on the allowlist is
+  never blocked through a CNAME either (§4.1).
 
 ### 6.2 Validation (a download is rejected unless all pass)
 

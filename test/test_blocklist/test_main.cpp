@@ -15,6 +15,7 @@
 #include "blocklist/hash.h"
 #include "blocklist/index.h"
 #include "blocklist/matcher.h"
+#include "blocklist/rules.h"
 #include "fakes/blocklist_builder.h"
 #include "fakes/mem_file_system.h"
 
@@ -240,6 +241,157 @@ static void test_cname_blocking_respects_allow_and_custom_rules() {
   TEST_ASSERT_FALSE(cb("x.example.com", "tracker-cdn.net.fake"));         // no accidental suffix match
 }
 
+// --- custom rule syntax and wildcard matching ---------------------------------------
+
+static ParsedRule pr(const char* s) {
+  return parseRule(s, strlen(s));
+}
+
+static void test_rule_parser_accepts_plain_adblock_and_hosts_forms() {
+  TEST_ASSERT_EQUAL_STRING("ads.example.com", pr("Ads.Example.COM").text.c_str());
+  TEST_ASSERT_EQUAL_STRING("ads.example.com", pr("  ads.example.com.  ").text.c_str());
+  TEST_ASSERT_EQUAL_STRING("ads.example.com", pr("||ads.example.com^").text.c_str());
+  TEST_ASSERT_EQUAL_STRING("ads.example.com", pr("||ads.example.com^$important").text.c_str());
+  TEST_ASSERT_EQUAL_STRING("ads.example.com", pr("0.0.0.0 ads.example.com").text.c_str());
+  TEST_ASSERT_EQUAL_STRING("ads.example.com", pr("127.0.0.1\tads.example.com  # note").text.c_str());
+  TEST_ASSERT_EQUAL_STRING("ads.example.com", pr(":: ads.example.com").text.c_str());
+  TEST_ASSERT_EQUAL(static_cast<int>(RuleKind::kDomain), static_cast<int>(pr("ads.example.com").kind));
+  TEST_ASSERT_FALSE(pr("||ads.example.com^").allow);
+}
+
+static void test_rule_parser_allow_prefix_and_subdomain_only() {
+  const ParsedRule a = pr("@@||safe.example.com^");
+  TEST_ASSERT_TRUE(a.allow);
+  TEST_ASSERT_EQUAL_STRING("safe.example.com", a.text.c_str());
+  const ParsedRule s = pr("*.example.com");
+  TEST_ASSERT_EQUAL(static_cast<int>(RuleKind::kSubdomains), static_cast<int>(s.kind));
+  TEST_ASSERT_EQUAL_STRING("*.example.com", s.text.c_str());
+  // A leading dot is not a wildcard: it means the domain.
+  TEST_ASSERT_EQUAL_STRING("example.com", pr(".example.com").text.c_str());
+}
+
+static void test_rule_parser_globs() {
+  const ParsedRule g = pr("Ads*.Example.com");
+  TEST_ASSERT_EQUAL(static_cast<int>(RuleKind::kGlob), static_cast<int>(g.kind));
+  TEST_ASSERT_EQUAL_STRING("ads*.example.com", g.text.c_str());
+  TEST_ASSERT_EQUAL(static_cast<int>(RuleKind::kGlob), static_cast<int>(pr("*track*").kind));
+  TEST_ASSERT_EQUAL(static_cast<int>(RuleKind::kGlob), static_cast<int>(pr("*.ads?.example.com").kind));
+  TEST_ASSERT_EQUAL_STRING("*.ads?.example.com", pr("*.ads?.example.com").text.c_str());
+}
+
+static void test_rule_parser_rejects_junk_and_overbroad_patterns() {
+  const char* bad[] = {"",
+                       "   ",
+                       "# comment",
+                       "! comment",
+                       "localhost",
+                       "ab",
+                       "bad domain.com",
+                       "ex ample.com",
+                       "http://x.com",
+                       "exa..mple.com",
+                       "-lead.com",
+
+                       "*",
+                       "*.*",
+                       "a*",
+                       "*.com",
+                       "*x*",
+                       "ex@mple.com",
+                       "ex!ample.com",
+                       "0.0.0.0"};
+  for (const char* b : bad) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "should be invalid: '%s'", b);
+    TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(RuleKind::kInvalid), static_cast<int>(pr(b).kind), msg);
+  }
+  std::string longGlob(kMaxGlobLen, 'a');
+  longGlob += "*";
+  TEST_ASSERT_EQUAL(static_cast<int>(RuleKind::kInvalid), static_cast<int>(pr(longGlob.c_str()).kind));
+  std::string longName(260, 'a');
+  longName += ".com";
+  TEST_ASSERT_EQUAL(static_cast<int>(RuleKind::kInvalid), static_cast<int>(pr(longName.c_str()).kind));
+}
+
+static bool gm(const char* pat, const char* name) {
+  return globMatch(pat, strlen(pat), name, strlen(name));
+}
+
+static void test_glob_match_semantics() {
+  TEST_ASSERT_TRUE(gm("ads*.example.com", "ads.example.com"));
+  TEST_ASSERT_TRUE(gm("ads*.example.com", "ads123.example.com"));
+  TEST_ASSERT_FALSE(gm("ads*.example.com", "xads.example.com"));
+  TEST_ASSERT_TRUE(gm("*track*", "my.tracker.net"));
+  TEST_ASSERT_TRUE(gm("ad?.net", "ads.net"));
+  TEST_ASSERT_FALSE(gm("ad?.net", "ad.net"));
+  TEST_ASSERT_FALSE(gm("ad?.net", "adss.net"));
+  TEST_ASSERT_TRUE(gm("a*b*c", "aXXbYYc"));
+  TEST_ASSERT_FALSE(gm("a*b*c", "aXXbYY"));
+  TEST_ASSERT_TRUE(gm("a**b", "ab"));
+  TEST_ASSERT_TRUE(gm("*", ""));
+  TEST_ASSERT_FALSE(gm("abc", ""));
+  TEST_ASSERT_TRUE(gm("*.example.com", "a.b.example.com"));
+  TEST_ASSERT_FALSE(gm("*.example.com", "example.com"));
+}
+
+static void test_glob_match_is_linear_on_adversarial_input() {
+  // A backtracking matcher takes exponential time on this; ours must finish at once.
+  std::string name(60, 'a');
+  TEST_ASSERT_FALSE(globMatch("*a*a*a*a*a*a*a*a*a*b", 20, name.data(), name.size()));
+}
+
+static RuleSet rules(std::initializer_list<const char*> lines) {
+  RuleSet s;
+  for (const char* l : lines) {
+    const ParsedRule r = pr(l);
+    if (r.kind == RuleKind::kDomain)
+      s.addDomain(r.text.data(), r.text.size());
+    else if (r.kind == RuleKind::kSubdomains)
+      s.addSubdomains(r.text.data() + 2, r.text.size() - 2);
+    else if (r.kind == RuleKind::kGlob)
+      TEST_ASSERT_TRUE(s.addGlob(r.text.data(), r.text.size()));
+  }
+  s.finalize();
+  return s;
+}
+
+static void test_ruleset_domain_subdomain_and_glob_matching() {
+  MatchFixture f({});
+  f.matcher.setCustom(rules({"plain.org", "*.only-subs.net", "ads*.example.com", "*track*"}), RuleSet());
+  auto blocked = [&](const char* n) { return f.m(n) == MatchResult::kBlocked; };
+  TEST_ASSERT_TRUE(blocked("plain.org"));
+  TEST_ASSERT_TRUE(blocked("x.plain.org"));
+  TEST_ASSERT_FALSE(blocked("only-subs.net"));  // "*.x" leaves the apex alone
+  TEST_ASSERT_TRUE(blocked("a.only-subs.net"));
+  TEST_ASSERT_TRUE(blocked("a.b.only-subs.net"));
+  TEST_ASSERT_TRUE(blocked("ads7.example.com"));
+  TEST_ASSERT_TRUE(blocked("x.ads7.example.com"));  // globs also cover subdomains of a match
+  TEST_ASSERT_FALSE(blocked("example.com"));
+  TEST_ASSERT_FALSE(blocked("notads.example.com"));
+  TEST_ASSERT_TRUE(blocked("pixel.tracker.io"));
+  TEST_ASSERT_FALSE(blocked("clean.io"));
+}
+
+static void test_ruleset_allow_glob_beats_block_and_main_list() {
+  MatchFixture f({"example.com"});
+  f.matcher.setCustom(rules({"*.shop.example.com"}), rules({"safe*.example.com"}));
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kAllowed), static_cast<int>(f.m("safe1.example.com")));
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kBlocked), static_cast<int>(f.m("other.example.com")));
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kBlocked), static_cast<int>(f.m("a.shop.example.com")));
+}
+
+static void test_ruleset_caps_globs_and_reports_size() {
+  RuleSet s;
+  for (size_t i = 0; i < kMaxGlobsPerList; i++) {
+    const std::string g = "adserver" + std::to_string(i) + "*.net";
+    TEST_ASSERT_TRUE(s.addGlob(g.data(), g.size()));
+  }
+  TEST_ASSERT_FALSE(s.addGlob("one-too-many*.net", 17));
+  TEST_ASSERT_EQUAL(static_cast<int>(kMaxGlobsPerList), static_cast<int>(s.globCount()));
+  s.addDomain("a.com", 5);
+  TEST_ASSERT_EQUAL(static_cast<int>(kMaxGlobsPerList + 1), static_cast<int>(s.size()));
+}
+
 static void test_collision_overblocks_and_allowlist_fixes_it() {
   // A hash collision makes an innocent name look listed. Simulate it by listing the
   // innocent name's hash under a "different" entry; the allowlist must rescue it.
@@ -306,6 +458,15 @@ int main(int, char**) {
   RUN_TEST(test_custom_allow_overrides_blocklist_and_custom_block_adds);
   RUN_TEST(test_cname_blocked_when_target_is_listed);
   RUN_TEST(test_cname_blocking_respects_allow_and_custom_rules);
+  RUN_TEST(test_rule_parser_accepts_plain_adblock_and_hosts_forms);
+  RUN_TEST(test_rule_parser_allow_prefix_and_subdomain_only);
+  RUN_TEST(test_rule_parser_globs);
+  RUN_TEST(test_rule_parser_rejects_junk_and_overbroad_patterns);
+  RUN_TEST(test_glob_match_semantics);
+  RUN_TEST(test_glob_match_is_linear_on_adversarial_input);
+  RUN_TEST(test_ruleset_domain_subdomain_and_glob_matching);
+  RUN_TEST(test_ruleset_allow_glob_beats_block_and_main_list);
+  RUN_TEST(test_ruleset_caps_globs_and_reports_size);
   RUN_TEST(test_collision_overblocks_and_allowlist_fixes_it);
   RUN_TEST(test_empty_holder_blocks_nothing);
   RUN_TEST(test_publish_while_readers_run_never_uses_freed_index);
