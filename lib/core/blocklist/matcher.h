@@ -43,14 +43,28 @@ class RuleSet {
   size_t size() const { return domains_.size() + subdomains_.size() + globs_.size(); }
   size_t globCount() const { return globs_.size(); }
   bool matches(const char* name, size_t len) const;
+  // Like matches(), but also says which rule fired (as it is written in the list:
+  // "example.com", "*.example.com" or the glob). Allocates: not for the hot path.
+  bool explain(const char* name, size_t len, std::string* rule) const;
 
  private:
+  bool find(const char* name, size_t len, std::string* rule) const;  // rule may be null
+
   DomainSet domains_;
   DomainSet subdomains_;
   std::vector<std::string> globs_;
 };
 
 enum class MatchResult { kNone, kBlocked, kAllowed };
+
+// Where a verdict came from (for "why was this blocked?").
+enum class MatchSource { kNone, kCustomAllow, kCustomBlock, kMainList };
+
+struct Explanation {
+  MatchResult result = MatchResult::kNone;
+  MatchSource source = MatchSource::kNone;
+  std::string rule;  // the custom rule, or the listed (parent) name for the main list
+};
 
 class Matcher {
  public:
@@ -61,6 +75,10 @@ class Matcher {
 
   // `name`: lowercase, no trailing dot. Allocation-free.
   MatchResult match(const char* name, size_t len) const;
+
+  // Same decision as match(), plus the rule that caused it. Allocates; for the
+  // dashboard's "why" lookup, never the DNS path.
+  Explanation explain(const char* name, size_t len) const;
 
   // CNAME cloaking: true if `target` (a CNAME target in the answer for `qname`) is
   // blocked. A name the user explicitly allowed is never blocked through its CNAME,
@@ -74,13 +92,13 @@ class Matcher {
   RuleSet customAllow_;
 };
 
-// Calls fn(hash) for the name and each parent with at least two labels; stops early
-// when fn returns true. Returns whether any call returned true.
+// Calls fn(suffix, suffixLen) for the name and each parent with at least two labels;
+// stops early when fn returns true. Returns whether any call returned true.
 template <typename Fn>
-bool forEachCandidate(const char* name, size_t len, Fn fn) {
+bool forEachSuffix(const char* name, size_t len, Fn fn) {
   size_t start = 0;
   while (start < len) {
-    if (fn(hashDomain(name + start, len - start))) return true;
+    if (fn(name + start, len - start)) return true;
     // Advance to the next label; stop before the last label (never match a bare TLD).
     size_t dot = start;
     while (dot < len && name[dot] != '.') dot++;
@@ -96,6 +114,12 @@ bool forEachCandidate(const char* name, size_t len, Fn fn) {
     start = next;
   }
   return false;
+}
+
+// Same walk, but fn gets the 48-bit hash of each candidate.
+template <typename Fn>
+bool forEachCandidate(const char* name, size_t len, Fn fn) {
+  return forEachSuffix(name, len, [&fn](const char* s, size_t n) { return fn(hashDomain(s, n)); });
 }
 
 }  // namespace blocklist

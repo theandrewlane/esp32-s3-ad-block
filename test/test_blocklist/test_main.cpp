@@ -241,6 +241,52 @@ static void test_cname_blocking_respects_allow_and_custom_rules() {
   TEST_ASSERT_FALSE(cb("x.example.com", "tracker-cdn.net.fake"));         // no accidental suffix match
 }
 
+static void test_explain_reports_the_rule_behind_each_verdict() {
+  MatchFixture f({"listed.com"});
+  RuleSet block, allow;
+  block.addDomain("blk.org", 7);
+  block.addSubdomains("sub.net", 7);
+  block.addGlob("ads*.glob.io", 12);
+  block.finalize();
+  allow.addDomain("ok.listed.com", 13);
+  allow.finalize();
+  f.matcher.setCustom(std::move(block), std::move(allow));
+  auto ex = [&](const char* n) { return f.matcher.explain(n, strlen(n)); };
+
+  Explanation e = ex("a.b.listed.com");  // main list, via a parent
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kBlocked), static_cast<int>(e.result));
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchSource::kMainList), static_cast<int>(e.source));
+  TEST_ASSERT_EQUAL_STRING("listed.com", e.rule.c_str());
+
+  e = ex("x.ok.listed.com");  // allow beats the list
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kAllowed), static_cast<int>(e.result));
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchSource::kCustomAllow), static_cast<int>(e.source));
+  TEST_ASSERT_EQUAL_STRING("ok.listed.com", e.rule.c_str());
+
+  e = ex("t.blk.org");
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchSource::kCustomBlock), static_cast<int>(e.source));
+  TEST_ASSERT_EQUAL_STRING("blk.org", e.rule.c_str());
+
+  e = ex("t.sub.net");
+  TEST_ASSERT_EQUAL_STRING("*.sub.net", e.rule.c_str());
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kNone), static_cast<int>(ex("sub.net").result));
+
+  e = ex("ads1.glob.io");
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchSource::kCustomBlock), static_cast<int>(e.source));
+  TEST_ASSERT_EQUAL_STRING("ads*.glob.io", e.rule.c_str());
+
+  e = ex("fine.org");
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kNone), static_cast<int>(e.result));
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchSource::kNone), static_cast<int>(e.source));
+  TEST_ASSERT_TRUE(e.rule.empty());
+  TEST_ASSERT_EQUAL(static_cast<int>(MatchResult::kNone), static_cast<int>(f.matcher.explain("", 0).result));
+
+  // explain() and match() must never disagree.
+  for (const char* n : {"a.b.listed.com", "x.ok.listed.com", "t.blk.org", "t.sub.net", "sub.net",
+                        "ads1.glob.io", "fine.org", "listed.com", "com"})
+    TEST_ASSERT_EQUAL(static_cast<int>(f.matcher.match(n, strlen(n))), static_cast<int>(ex(n).result));
+}
+
 // --- custom rule syntax and wildcard matching ---------------------------------------
 
 static ParsedRule pr(const char* s) {
@@ -458,6 +504,7 @@ int main(int, char**) {
   RUN_TEST(test_custom_allow_overrides_blocklist_and_custom_block_adds);
   RUN_TEST(test_cname_blocked_when_target_is_listed);
   RUN_TEST(test_cname_blocking_respects_allow_and_custom_rules);
+  RUN_TEST(test_explain_reports_the_rule_behind_each_verdict);
   RUN_TEST(test_rule_parser_accepts_plain_adblock_and_hosts_forms);
   RUN_TEST(test_rule_parser_allow_prefix_and_subdomain_only);
   RUN_TEST(test_rule_parser_globs);
