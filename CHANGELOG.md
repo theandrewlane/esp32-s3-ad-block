@@ -34,8 +34,9 @@ All notable changes to this project are documented here. The format follows
 
 - Larger blocklist: the updater drops the old flash copy when the new list fits only
   alone (the loaded copy keeps serving), so lists up to ~410k entries fit the 4 MB
-  board's 2 MB LittleFS. Default list is now StevenBlack + Hagezi Pro (~276k domains),
-  published by this fork's CI.
+  board's 2 MB LittleFS. Default list is now StevenBlack + Hagezi Ultimate (~360k
+  domains, up from ~315k with Hagezi Pro), published by this fork's CI. Hagezi Ultimate
+  is the more aggressive tier: allow a name from the Activity tab if a site breaks.
 
 ### Fixed
 

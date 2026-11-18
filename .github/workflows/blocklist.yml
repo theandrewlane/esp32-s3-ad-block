@@ -52,7 +52,7 @@ jobs:
             exit 0
           fi
           entries=$(( ($(stat -c%s blocklist.bin) - 32 - 4 * 65537) / 4 ))
-          notes="Auto-built $(date -u +%F): ${entries} entries (StevenBlack base + Hagezi Pro).
+          notes="Auto-built $(date -u +%F): ${entries} entries (StevenBlack base + Hagezi Ultimate).
 
           Device setting (Blocklist URL):
           https://github.com/${GITHUB_REPOSITORY}/releases/download/blocklist/blocklist.bin"
