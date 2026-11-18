@@ -125,6 +125,6 @@ dashboard shows a red banner. Clear AD on these answers. Strict mode
    (IP, second IP, TLS name, optional DoH). To make it a built-in choice: add a
    `Provider` value + `ProviderInfo` in `lib/core/config/config.{h,cpp}`
    (`providerName`, `parseProvider`, `info`), and an `<option>` in the dashboard
-   settings form (`src/web/page.h`).
+   settings form (`src/web/page.html`, then `tools/gen_page.py`).
 4. Native tests in `test/test_config`: chain order and names for the new provider.
 5. Document it in the README configuration table.

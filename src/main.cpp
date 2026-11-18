@@ -29,6 +29,7 @@
 #include "platform/nvs_kv_store.h"
 #include "platform/psram.h"
 #include "platform/restart_info.h"
+#include "platform/sd_log.h"
 #include "platform/serial_logger.h"
 #include "platform/transports.h"
 #include "platform/watchdog.h"
@@ -64,6 +65,7 @@ app::ClientTable gClients;
 app::BlocklistManager* gBlocklist = nullptr;
 app::AppPolicy* gPolicy = nullptr;
 display::DisplayStats gDisplayStats;
+platform::SdBlockLog gSdLog;
 app::DnsService* gDns = nullptr;
 auth::PasswordStore* gPasswords = nullptr;
 auth::LoginGuard gLogins(gClock);
@@ -135,6 +137,7 @@ void applyLiveConfig(const config::AppConfig& c) {
   setenv("TZ", c.timezone, 1);
   tzset();
   gLog.setLevel(static_cast<hal::LogLevel>(c.logLevel));
+  gSdLog.setEnabled(c.sdLog);
 }
 
 // Wall clock: SNTP via hard-coded Cloudflare time IPs (no DNS needed) plus the pool.
@@ -361,7 +364,8 @@ void setup() {
   gBlocklist = new app::BlocklistManager(gFs, gHttp, gKv, gClock, gRandom, gLog, feedWatchdog);
   gBlocklist->begin();
   gClients.loadBans();
-  gPolicy = new app::AppPolicy(gClients, *gBlocklist, &gDisplayStats);
+  gSdLog.begin();
+  gPolicy = new app::AppPolicy(gClients, *gBlocklist, &gDisplayStats, &gSdLog);
 
   clearWifiIfBootHeld();
   if (!web::connectWifi()) web::runSetupPortal(gServer, kApPrefix, kHostname);  // reboots when done
@@ -378,6 +382,8 @@ void setup() {
   ctx.clients = &gClients;
   ctx.blocklist = gBlocklist;
   ctx.dns = gDns;
+  ctx.activity = &gDisplayStats;
+  ctx.sdLog = &gSdLog;
   ctx.passwords = gPasswords;
   ctx.logins = &gLogins;
   ctx.sessions = &gSessions;

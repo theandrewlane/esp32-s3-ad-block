@@ -31,6 +31,7 @@ struct AppConfig {
   bool firefoxCanary = true;
   bool icloudRelay = false;
   bool privateReverse = true;
+  bool sdLog = false;  // append blocked queries to the SD card (off: it records who browsed what)
   char timezone[48] = "UTC0";
   uint8_t logLevel = 2;  // 0 error .. 3 debug
 };

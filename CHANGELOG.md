@@ -21,6 +21,14 @@ All notable changes to this project are documented here. The format follows
   literal characters) match the name and its parents, and Adblock `||example.com^`
   (modifiers ignored), `@@||example.com^` (allow) and hosts-file lines
   (`0.0.0.0 example.com`) are accepted in the rule boxes. Allow rules still win.
+  The dashboard explains the syntax under _Blocklist & rules_.
+- Dashboard Activity tab: the last 80 lookups and the most blocked names, with a one-tap
+  Allow or Block, and a "Why was this blocked?" lookup that names the rule (your
+  allowlist, your own block rule, or the downloaded list).
+- Block log on the SD card (FAT32): with _Settings → Log blocked lookups to the SD card_
+  on (off by default), every blocked lookup is appended to a CSV file per day
+  (time, device, domain, blocklist or CNAME), 30 days kept. Download or delete the files
+  under _Device → Block log_.
 
 ### Changed
 

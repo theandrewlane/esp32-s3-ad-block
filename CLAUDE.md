@@ -39,6 +39,7 @@ tools/lint.sh                            # clang-tidy on lib/core (.clang-tidy)
 .venv/bin/zizmor --persona=auditor .github/ && .venv/bin/actionlint   # workflow lint
 tools/make_factory.sh                    # merged image flashable at 0x0 (after a build)
 python3 tools/build_blocklist.py out.bin # build a format-v2 blocklist (stdlib only)
+python3 tools/gen_page.py                # src/web/page.html -> src/web/page.h (after editing the page)
 python3 tools/make_update_json.py fw.bin vX.Y.Z update.json   # dashboard update manifest
 python3 -m unittest discover -s tools -p 'test_*.py'   # tool + web page tests
 ```
@@ -52,11 +53,12 @@ port troubleshooting: skill `build-flash`.
 
 ```
 lib/core/      portable C++17 logic, NO Arduino/IDF headers (tested natively)
-  dns/ blocklist/ cache/ upstream/ sched/ update/ config/ auth/ clients/ diag/ hal/ util/
+  dns/ blocklist/ cache/ upstream/ sched/ update/ config/ auth/ clients/ diag/ hal/ util/ querylog/
 src/           ESP32-only: main.cpp (composition root), platform/ (HAL impls: TLS,
                transports, LittleFS, NVS, HTTP), tasks/ (DNS service tasks),
                app/ (blocklist manager, client table, DNS policy),
-               web/ (dashboard REST API, page.h, Wi-Fi setup portal; skill web-ui)
+               web/ (dashboard REST API, page.html -> page.h via tools/gen_page.py,
+               Wi-Fi setup portal; skill web-ui); platform/sd_log.* (SD block log)
 test/          Unity tests: test/test_<area>/test_main.cpp, fakes in test/fakes/
 tools/         blocklist builder, factory image, setup/format/lint/coverage scripts
 installer/     browser installer + 404 (esp-web-tools pinned by SHA-512), deployed by CI
@@ -133,6 +135,10 @@ native tests; pre-push = clang-tidy + esp32s3 firmware build.
 - **CA bundle:** `#include <esp_crt_bundle.h>` (ESP-IDF's; core 3 has no Arduino copy).
 - **lwIP core locking is on** (`CONFIG_LWIP_TCPIP_CORE_LOCKING`): socket calls are fine
   from any task, raw lwIP core calls still go through `tcpip_callback`.
+- **Never run `tools/format.sh` repo-wide:** it reformats unrelated files. Use
+  `.venv/bin/clang-format -i <your files>`.
+- **SD card:** FAT32 only (no exFAT), on HSPI (SPI2 belongs to the display QSPI). Don't
+  call `SD.usedBytes()`: it scans the FAT (tens of seconds on a 64 GB card).
 - **Platform tools:** pioarduino keeps esptool 5 (`esptool`, dashed subcommands like
   `read-flash`) in `~/.platformio/penv/bin`, and writes `firmware.factory.bin` after
   each build (`tools/make_factory.sh` checks and copies it). First build downloads

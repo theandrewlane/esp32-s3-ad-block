@@ -103,6 +103,7 @@ static void test_round_trip_through_nvs() {
   config::setField(c, "up_sec", "cloudflare");
   config::setField(c, "blk_ttl", "42");
   config::setField(c, "icloud", "1");
+  config::setField(c, "sd_log", "1");
   config::setField(c, "tz", "UTC0");
   TEST_ASSERT_TRUE(config::save(kv, c));
   AppConfig back;
@@ -110,8 +111,13 @@ static void test_round_trip_through_nvs() {
   TEST_ASSERT_EQUAL(static_cast<int>(Provider::kQuad9), static_cast<int>(back.primary));
   TEST_ASSERT_EQUAL_UINT32(42, back.blockedTtl);
   TEST_ASSERT_TRUE(back.icloudRelay);
+  TEST_ASSERT_TRUE(back.sdLog);
+  TEST_ASSERT_FALSE(AppConfig{}.sdLog);  // logging who browsed what is opt-in
   TEST_ASSERT_EQUAL_STRING("UTC0", back.timezone);
   TEST_ASSERT_FALSE(config::requiresRestart(c, back));
+  AppConfig toggled = c;
+  toggled.sdLog = !toggled.sdLog;
+  TEST_ASSERT_FALSE(config::requiresRestart(c, toggled));  // applies live
 }
 
 static void test_load_handles_empty_future_and_corrupt_stores() {

@@ -11,13 +11,15 @@
 #include "dns/query_policy.h"
 
 #include "display/display_stats.h"
+#include "platform/sd_log.h"
 
 namespace app {
 
 class AppPolicy final : public dns::IQueryPolicy {
  public:
-  AppPolicy(ClientTable& clients, BlocklistManager& blocklist, display::DisplayStats* stats = nullptr)
-      : clients_(clients), blocklist_(blocklist), stats_(stats) {}
+  AppPolicy(ClientTable& clients, BlocklistManager& blocklist, display::DisplayStats* stats = nullptr,
+            platform::SdBlockLog* sdLog = nullptr)
+      : clients_(clients), blocklist_(blocklist), stats_(stats), sdLog_(sdLog) {}
 
   dns::PolicyAction decide(const dns::Query& q, uint32_t clientIpv4) override {
     if ((ntohl(clientIpv4) >> 24) == 127) return dns::PolicyAction::kForward;  // the device's own lookups
@@ -30,6 +32,7 @@ class AppPolicy final : public dns::IQueryPolicy {
       uint8_t hourIdx = static_cast<uint8_t>((now / 3600000UL) % 24);
       stats_->record(q.qname, q.qnameLen, clientIpv4, blocked, now, hourIdx);
     }
+    if (blocked && sdLog_) sdLog_->record(q.qname, q.qnameLen, clientIpv4, querylog::Reason::kBlocked);
     return blocked ? dns::PolicyAction::kBlock : dns::PolicyAction::kForward;
   }
 
@@ -40,6 +43,7 @@ class AppPolicy final : public dns::IQueryPolicy {
     if (!clients_.blockingOn()) return false;
     if (!blocklist_.matcher().cnameBlocked(q.qname, q.qnameLen, target, len)) return false;
     clients_.reclassifyBlocked(clientIpv4);
+    if (sdLog_) sdLog_->record(q.qname, q.qnameLen, clientIpv4, querylog::Reason::kCname);
     if (stats_) {
       const uint32_t now = millis();
       stats_->reclassifyBlocked(q.qname, q.qnameLen, clientIpv4, now,
@@ -52,6 +56,7 @@ class AppPolicy final : public dns::IQueryPolicy {
   ClientTable& clients_;
   BlocklistManager& blocklist_;
   display::DisplayStats* stats_ = nullptr;
+  platform::SdBlockLog* sdLog_ = nullptr;
 };
 
 }  // namespace app

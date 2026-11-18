@@ -36,7 +36,7 @@ network as hostile.
       `'self'` plus the update origin only; a new external fetch needs its origin
       added there deliberately, never `*`.
 - [ ] All values rendered into HTML are escaped (`htmlEscape`); JSON strings are
-      escaped (`jsonEscape`); no `innerHTML` with server data in `page.h`, use
+      escaped (`jsonEscape`); no `innerHTML` with server data in `page.html`, use
       `textContent`. `tools/test_web_pages.py` checks the pages (skill `web-ui`).
 - [ ] Inputs are validated (domain syntax, IPs, URL must be `https://`, numeric
       ranges).

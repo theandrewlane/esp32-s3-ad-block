@@ -19,9 +19,11 @@
 #include "auth/auth.h"
 #include "config/config.h"
 #include "diag/restart.h"
+#include "display/display_stats.h"
 #include "hal/clock.h"
 #include "hal/kv_store.h"
 #include "hal/logger.h"
+#include "platform/sd_log.h"
 #include "tasks/dns_service.h"
 
 namespace web {
@@ -31,6 +33,8 @@ struct DashboardContext {
   app::ClientTable* clients = nullptr;
   app::BlocklistManager* blocklist = nullptr;
   app::DnsService* dns = nullptr;
+  platform::SdBlockLog* sdLog = nullptr;      // blocked-query log on the SD card (may be null)
+  display::DisplayStats* activity = nullptr;  // recent queries + top blocked (may be null)
   auth::PasswordStore* passwords = nullptr;
   auth::LoginGuard* logins = nullptr;
   auth::SessionStore* sessions = nullptr;
@@ -73,6 +77,11 @@ class Dashboard {
   void sendPage();  // feeds both watchdogs while one upload runs in handleClient()
 
   void handleStats();
+  void handleActivity();
+  void handleWhy();
+  void handleLogFiles();
+  void handleLogDownload();
+  void handleLogClear();
   void handleGetConfig();
   void handleSetConfig();
   void handleLogin();

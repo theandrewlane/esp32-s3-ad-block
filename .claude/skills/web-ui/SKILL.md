@@ -1,6 +1,6 @@
 ---
 name: web-ui
-description: Design system and rules for every web page of the project - the dashboard (src/web/page.h), the Wi-Fi setup portal (src/web/portal.cpp) and the GitHub Pages installer (installer/). Use before changing any of their HTML/CSS/JS, adding a chart, card, banner or setting, or styling a new page.
+description: Design system and rules for every web page of the project - the dashboard (src/web/page.html, compiled into src/web/page.h), the Wi-Fi setup portal (src/web/portal.cpp) and the GitHub Pages installer (installer/). Use before changing any of their HTML/CSS/JS, adding a chart, card, banner or setting, or styling a new page.
 ---
 
 # Web UI
@@ -11,7 +11,7 @@ has no internet, and the dashboard lives in flash.
 
 | Page         | File                   | Constraints                                                                                                                                                               |
 | ------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dashboard    | `src/web/page.h`       | CSP `default-src 'self'` + update-site origin, inline script/style allowed. ≤ 64 KB (test). Login screen until `/api/stats` answers (session cookie); polls it every 4 s. |
+| Dashboard    | `src/web/page.html`    | CSP `default-src 'self'` + update-site origin, inline script/style allowed. ≤ 64 KB (test). Login screen until `/api/stats` answers (session cookie); polls it every 4 s. |
 | Setup portal | `src/web/portal.cpp`   | Opened by phones' captive mini-browsers (iOS CNA: little JS): **must work without JS**. Built with `String` (not the DNS hot path).                                       |
 | Installer    | `installer/index.html` | CSP `script-src 'self'`: **no inline script**. `__VERSION__` is stamped by release.yml. esp-web-tools vendored and hash-checked. `404.html`.                              |
 
@@ -92,7 +92,7 @@ them** (legend lists). A new entity takes the next slot (green `#008300`, violet
 - Empty state text ("Collecting data…") instead of an empty frame.
 - Counters reset on reboot: detect a decrease and restart the history.
 
-## Components (class names in page.h)
+## Components (class names in page.html)
 
 `.card` · `.tiles/.tile` · `.hero` · `.pill.is-good|warn|bad` with `.dot` ·
 `.banner.bad|warn|info` (left edge + wash; `hidden` toggles it) · `.badge` ·
@@ -111,14 +111,19 @@ them** (legend lists). A new entity takes the next slot (green `#008300`, violet
 - New origins need a CSP change in `pageCsp()` (dashboard) or the installer `<meta>`:
   avoid.
 
-## Preview without a board
+## Editing and preview without a board
 
-Extract the page and serve it with mocked data (copy a real `/api/stats` from the board:
-`curl -u admin:<password> http://s3adblock.local/api/stats`):
+Edit `src/web/page.html`, then run `python3 tools/gen_page.py` to regenerate
+`src/web/page.h` (the gzip byte array the firmware serves; never edit it by hand).
+`tools/test_web_pages.py` fails when the two disagree. It also parses the script
+with node when available (`PATH=~/.nvm/versions/node/<v>/bin:$PATH`).
+
+To preview, serve `src/web/page.html` with mocked data (copy a real `/api/stats` from
+the board: `curl -u admin:<password> http://s3adblock.local/api/stats`):
 
 ```python
-import re; html = re.search(r'R"HTML\((.*)\)HTML"', open("src/web/page.h").read(), re.S).group(1)
-# serve html at /, the JSON at /api/stats and /api/config, POST -> 200 "ok"
+html = open("src/web/page.html").read()
+# serve html at /, the JSON at /api/stats, /api/config, /api/activity, /api/log/files; POST -> 200 "ok"
 ```
 
 The page starts on its login screen: answer `401` to `/api/*` until `POST /api/login`

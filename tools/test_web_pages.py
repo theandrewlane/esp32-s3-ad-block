@@ -21,10 +21,7 @@ PAGE_BUDGET = 64 * 1024  # bytes of flash for the dashboard page
 
 
 def dashboard() -> str:
-    src = (ROOT / "src/web/page.h").read_text(encoding="utf-8")
-    m = re.search(r'R"HTML\((.*)\)HTML"', src, re.S)
-    assert m, "kPage raw string not found"
-    return m.group(1)
+    return (ROOT / "src/web/page.html").read_text(encoding="utf-8")
 
 
 def portal_head() -> str:
@@ -49,6 +46,15 @@ def external_loads(html: str) -> list:
 class DashboardPageTest(unittest.TestCase):
     def setUp(self):
         self.html = dashboard()
+
+    def test_page_h_is_generated_from_page_html(self):
+        # page.h holds the gzip bytes the device serves: regenerate with tools/gen_page.py
+        r = subprocess.run(
+            ["python3", str(ROOT / "tools/gen_page.py"), "--check"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_fits_budget(self):
         self.assertLess(len(self.html.encode()), PAGE_BUDGET)

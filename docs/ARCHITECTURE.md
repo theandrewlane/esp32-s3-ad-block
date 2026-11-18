@@ -119,12 +119,14 @@ src/                          ESP32 only (Arduino core 3.3.12 / ESP-IDF 5.5)
               psram.h, littlefs_fs.h, nvs_kv_store.h, esp_http.* (HTTPS client),
               tls_stream.* (mbedTLS + lwIP), transports.* (DoT, DoH, UDP)
   tasks/      dns_service.*       dns_io, dns_tcp and dns_up tasks
+  platform/   sd_log.*            blocked-query log on the SD card (see §8)
   app/        blocklist_manager.* list install/update, rules, status
               clients.*           client table (stats, MACs) using clients::BanList
                                   and PauseTimer; bans apply even if the table is full
               app_policy.h        the DNS policy used by the tasks
   web/        dashboard.*         REST API + security checks
-              page.h              dashboard page (design rules: skill web-ui)
+              page.html           dashboard page source (design rules: skill web-ui)
+              page.h              generated from page.html by tools/gen_page.py (gzip)
               portal.*            Wi-Fi setup access point and pages
 
 test/                         Unity tests, one folder per area (test_dns, ...)
@@ -632,6 +634,25 @@ automatically. This is a circuit-breaker with exponential backoff.
 - **Dashboard updates:** `POST /api/config` takes JSON. The values are validated,
   stored, and applied live where possible (upstreams, TTLs, schedule); otherwise
   the device reboots.
+- **Visibility:** `GET /api/activity` (the last 80 lookups from `DisplayStats` plus the
+  most blocked names), `GET /api/why?name=` (`Matcher::explain`: which rule, allowlist,
+  own block rule or main list, decides a name; same logic as the DNS path, but it
+  allocates, so it is never called from there) and the dashboard's Activity tab, which
+  adds one-tap Allow / Block through `/api/rules/add`.
+- **SD block log** (`sd_log` setting, off by default: it records who looked up what).
+  `lib/core/querylog` holds the CSV line format, day file names and the 30-day
+  retention rule; `src/platform/sd_log.*` is the ESP32 side. `AppPolicy` calls
+  `SdBlockLog::record()` for each blocked lookup (including CNAME-cloaked ones): it only
+  copies a fixed struct into a 48-entry FreeRTOS queue and never blocks (a full queue
+  counts a dropped line). A priority-1 `sd_log` task drains the queue every 2 s and
+  appends to `/log/YYYY-MM-DD.csv` (`time,client,domain,reason`). The card is on the
+  second SPI host (HSPI, CS 10 / MOSI 11 / CLK 12 / MISO 13) because the display's QSPI
+  owns SPI2; FAT32 only (no exFAT in this FatFS). It is mounted only while logging is
+  on, and retried every 30 s when absent or after a write error. The task is not on the
+  hardware watchdog: a stuck card can only stall logging, never DNS. Free space is not
+  reported (counting it scans the whole FAT: tens of seconds on a 64 GB card).
+  Dashboard: Device → Block log lists and downloads the days (`/api/log/files`,
+  `/api/log?day=`, streamed in 2 KB chunks) and `POST /api/log/clear` deletes them.
 - **`secrets.h`** (gitignored; `secrets.example.h` is committed) only provides
   first-boot defaults:
   - optional Wi-Fi credentials;
@@ -698,7 +719,8 @@ automatically. This is a circuit-breaker with exponential backoff.
     device. This blocks DNS-rebinding attacks that reach the API through an
     attacker's hostname.
   - The `Host` header must be the device IP or `*.local`.
-- **Read endpoints** (`/api/stats`, `/api/config`) need a login too (upstream leaves
+- **Read endpoints** (`/api/stats`, `/api/config`, `/api/activity`, `/api/why`,
+  `/api/log*`) need a login too (upstream leaves
   them open), so client IPs and MACs are no longer visible to the whole LAN.
 - **Firmware OTA:**
   - Browser upload and ArduinoOTA require the dashboard password and OTA password

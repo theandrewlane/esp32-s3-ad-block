@@ -6,6 +6,7 @@
 #include <mbedtls/base64.h>
 
 #include <ctime>
+#include <memory>
 
 #include "platform/restart_info.h"
 #include "platform/watchdog.h"
@@ -209,6 +210,11 @@ void Dashboard::begin() {
     sendPage();
   });
   s.on("/api/stats", HTTP_GET, [this]() { handleStats(); });
+  s.on("/api/activity", HTTP_GET, [this]() { handleActivity(); });
+  s.on("/api/why", HTTP_GET, [this]() { handleWhy(); });
+  s.on("/api/log/files", HTTP_GET, [this]() { handleLogFiles(); });
+  s.on("/api/log", HTTP_GET, [this]() { handleLogDownload(); });
+  s.on("/api/log/clear", HTTP_POST, [this]() { handleLogClear(); });
   s.on("/api/config", HTTP_GET, [this]() { handleGetConfig(); });
   s.on("/api/config", HTTP_POST, [this]() { handleSetConfig(); });
   s.on("/api/login", HTTP_POST, [this]() { handleLogin(); });
@@ -265,6 +271,140 @@ void Dashboard::begin() {
   s.onNotFound([this]() {
     if (guard(Access::kPublic)) sendText(404, "not found");
   });
+}
+
+// Recent queries (newest first) and the most blocked names, for the Activity tab.
+void Dashboard::handleActivity() {
+  if (!guard(Access::kRead)) return;
+  using display::DisplayStats;
+  String j;
+  j.reserve(8192);
+  j += "{\"recent\":[";
+  if (ctx_.activity) {
+    std::unique_ptr<DisplayStats::QueryEvent[]> log(new DisplayStats::QueryEvent[DisplayStats::kLogCapacity]);
+    size_t n = 0;
+    ctx_.activity->copyLog(log.get(), &n);
+    const uint32_t now = millis();
+    for (size_t i = n; i-- > 0;) {  // the copy is oldest first
+      const DisplayStats::QueryEvent& e = log[i];
+      if (i + 1 != n) j += ",";
+      j += "{\"d\":" + q(e.domain) + ",\"ip\":" + q(IPAddress(e.clientIp).toString()) +
+           ",\"ago\":" + String((now - e.timeMs) / 1000) + ",\"blocked\":" + b(e.blocked) + "}";
+    }
+  }
+  j += "],\"top\":[";
+  if (ctx_.activity) {
+    DisplayStats::TopDomain top[DisplayStats::kTopDomainsN];
+    size_t n = 0;
+    ctx_.activity->copyTopDomains(top, &n);
+    for (size_t i = 0; i < n; i++)
+      j += (i ? "," : "") + String("{\"d\":") + q(top[i].name) + ",\"n\":" + String(top[i].count) + "}";
+  }
+  j += "]}";
+  ctx_.server->send(200, "application/json", j);
+}
+
+// "Why was this blocked?": which rule decides a name (same logic as the DNS path).
+void Dashboard::handleWhy() {
+  if (!guard(Access::kRead)) return;
+  String name = ctx_.server->arg("name");
+  name.trim();
+  name.toLowerCase();
+  if (name.endsWith(".")) name.remove(name.length() - 1);
+  bool valid = name.length() > 0 && name.length() <= 253;
+  for (size_t i = 0; valid && i < name.length(); i++) {
+    const char c = name[i];
+    valid = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
+  }
+  if (!valid) {
+    sendText(400, "enter a domain name such as ads.example.com");
+    return;
+  }
+  const blocklist::Explanation e = ctx_.blocklist->matcher().explain(name.c_str(), name.length());
+  const char* verdict = e.result == blocklist::MatchResult::kBlocked   ? "blocked"
+                        : e.result == blocklist::MatchResult::kAllowed ? "allowed"
+                                                                       : "none";
+  const char* source = e.source == blocklist::MatchSource::kCustomAllow   ? "allowlist"
+                       : e.source == blocklist::MatchSource::kCustomBlock ? "custom block"
+                       : e.source == blocklist::MatchSource::kMainList    ? "blocklist"
+                                                                          : "none";
+  String j = "{\"name\":" + q(name) + ",\"verdict\":" + q(verdict) + ",\"source\":" + q(source) +
+             ",\"rule\":" + q(e.rule.c_str()) + ",\"blockingOn\":" + b(ctx_.clients->blockingOn()) + "}";
+  ctx_.server->send(200, "application/json", j);
+}
+
+// SD block log: card status for the Device tab and the list of day files.
+void Dashboard::handleLogFiles() {
+  if (!guard(Access::kRead)) return;
+  const char* state = "unavailable";
+  String j = "{";
+  uint64_t cardMb = 0;
+  uint32_t logged = 0, dropped = 0;
+  if (ctx_.sdLog) {
+    const platform::SdBlockLog::Status st = ctx_.sdLog->status();
+    state = st.state == platform::SdBlockLog::State::kOff      ? "off"
+            : st.state == platform::SdBlockLog::State::kNoCard ? "no card"
+            : st.state == platform::SdBlockLog::State::kReady  ? "logging"
+                                                               : "error";
+    cardMb = st.totalBytes / 1048576ULL;
+    logged = st.logged;
+    dropped = st.dropped;
+  }
+  j += "\"state\":" + q(state) + ",\"cardMb\":" + String(static_cast<unsigned long>(cardMb)) +
+       ",\"logged\":" + String(logged) + ",\"dropped\":" + String(dropped) + ",\"files\":[";
+  platform::SdBlockLog::DayFile days[platform::SdBlockLog::kMaxDays];
+  size_t n = 0;
+  if (ctx_.sdLog && ctx_.sdLog->listDays(days, platform::SdBlockLog::kMaxDays, &n)) {
+    // Newest first (file names sort by date).
+    for (size_t i = 0; i < n; i++)
+      for (size_t k = i + 1; k < n; k++)
+        if (strcmp(days[k].name, days[i].name) > 0) std::swap(days[i], days[k]);
+    for (size_t i = 0; i < n; i++)
+      j += (i ? "," : "") + String("{\"name\":") + q(days[i].name) + ",\"bytes\":" + String(days[i].bytes) +
+           "}";
+  }
+  j += "]}";
+  ctx_.server->send(200, "application/json", j);
+}
+
+// GET /api/log?day=2026-11-17.csv streams one day as CSV, a chunk at a time so DNS
+// logging can interleave (the card lock is held per chunk, not per download).
+void Dashboard::handleLogDownload() {
+  if (!guard(Access::kRead)) return;
+  const String name = ctx_.server->arg("day");
+  if (!ctx_.sdLog || name.length() != 14) {
+    sendText(404, "no such log");
+    return;
+  }
+  static constexpr size_t kChunk = 2048;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[kChunk]);
+  size_t got = 0;
+  if (!ctx_.sdLog->readDay(name.c_str(), 0, buf.get(), kChunk, &got)) {
+    sendText(404, "no such log (or the card is not ready)");
+    return;
+  }
+  WebServer& s = *ctx_.server;
+  s.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  s.sendHeader("Content-Disposition", "attachment; filename=\"adblock-" + name + "\"");
+  s.send(200, "text/csv", "");
+  uint32_t offset = 0;
+  while (got > 0) {
+    s.sendContent(reinterpret_cast<const char*>(buf.get()), got);
+    offset += got;
+    uploadProgress();  // keeps the software watchdog fed during a long download
+    if (!ctx_.sdLog->readDay(name.c_str(), offset, buf.get(), kChunk, &got)) break;
+  }
+  s.sendContent("");  // terminates the chunked body
+}
+
+void Dashboard::handleLogClear() {
+  if (!guard(Access::kAuth)) return;
+  if (!ctx_.sdLog) {
+    sendText(404, "no SD card support");
+    return;
+  }
+  const bool ok = ctx_.sdLog->clearAll();
+  sendText(ok ? 200 : 409, ok ? "log files deleted" : "the SD card is not ready");
 }
 
 void Dashboard::handleStats() {
@@ -355,7 +495,7 @@ void Dashboard::handleGetConfig() {
        ",\"up_cname\":" + q(c.customName) + ",\"up_cdoh\":" + b(c.customDoh);
   j += ",\"pad\":" + String(b(c.padding)) + ",\"ad\":" + b(c.passAd) + ",\"blk_ttl\":" + String(c.blockedTtl);
   j += ",\"ff_canary\":" + String(b(c.firefoxCanary)) + ",\"icloud\":" + b(c.icloudRelay) +
-       ",\"priv_rev\":" + b(c.privateReverse);
+       ",\"priv_rev\":" + b(c.privateReverse) + ",\"sd_log\":" + b(c.sdLog);
   j += ",\"tz\":" + q(c.timezone) + ",\"log\":" + String(c.logLevel) + "}";
   ctx_.server->send(200, "application/json", j);
 }
