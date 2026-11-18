@@ -58,7 +58,7 @@ src/           ESP32-only: main.cpp (composition root), platform/ (HAL impls: TL
                transports, LittleFS, NVS, HTTP), tasks/ (DNS service tasks),
                app/ (blocklist manager, client table, DNS policy),
                web/ (dashboard REST API, page.html -> page.h via tools/gen_page.py,
-               Wi-Fi setup portal; skill web-ui); platform/sd_log.* (SD block log)
+               Wi-Fi setup portal; skill web-ui); platform/sd_{card,fs,log}.* (SD card, blocklist storage, block log)
 test/          Unity tests: test/test_<area>/test_main.cpp, fakes in test/fakes/
 tools/         blocklist builder, factory image, setup/format/lint/coverage scripts
 installer/     browser installer + 404 (esp-web-tools pinned by SHA-512), deployed by CI
@@ -138,7 +138,8 @@ native tests; pre-push = clang-tidy + esp32s3 firmware build.
 - **Never run `tools/format.sh` repo-wide:** it reformats unrelated files. Use
   `.venv/bin/clang-format -i <your files>`.
 - **SD card:** FAT32 only (no exFAT), on HSPI (SPI2 belongs to the display QSPI). Don't
-  call `SD.usedBytes()`: it scans the FAT (tens of seconds on a 64 GB card).
+  call `SD.usedBytes()`: it scans the FAT (tens of seconds on a 64 GB card). Every SD call
+  holds `SdCard::lock()` (the Arduino SD library is not thread-safe).
 - **Platform tools:** pioarduino keeps esptool 5 (`esptool`, dashed subcommands like
   `read-flash`) in `~/.platformio/penv/bin`, and writes `firmware.factory.bin` after
   each build (`tools/make_factory.sh` checks and copies it). First build downloads

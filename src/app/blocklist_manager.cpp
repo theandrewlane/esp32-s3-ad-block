@@ -35,10 +35,12 @@ void yieldBriefly() {
 
 }  // namespace
 
-BlocklistManager::BlocklistManager(hal::IFileSystem& fs, hal::IHttpClient& http, hal::IKeyValueStore& kv,
-                                   const hal::IClock& clock, hal::IRandom& random, hal::ILogger& log,
-                                   blocklist::ProgressFn tick)
+BlocklistManager::BlocklistManager(hal::IFileSystem& fs, hal::IFileSystem& listFs, hal::IHttpClient& http,
+                                   hal::IKeyValueStore& kv, const hal::IClock& clock, hal::IRandom& random,
+                                   hal::ILogger& log, blocklist::ProgressFn tick)
     : fs_(fs),
+      listFs_(listFs),
+      installFs_(&listFs),
       kv_(kv),
       clock_(clock),
       log_(log),
@@ -51,7 +53,7 @@ BlocklistManager::BlocklistManager(hal::IFileSystem& fs, hal::IHttpClient& http,
       holder_(yieldBriefly),
       matcher_(holder_),
       scheduler_(sched::ScheduleConfig{}, clock, kv, random),
-      updater_(limits_, fs, http, kv, *this, log) {
+      updater_(limits_, listFs, http, kv, *this, log) {
   updater_.setProgress(tick);
 }
 
@@ -68,10 +70,19 @@ void BlocklistManager::begin() {
   if (kv_.getU32(kKeyOk, ok)) lastOk_ = ok != 0;
   fs_.remove("/update.cfg");  // upstream's settings file: superseded by NVS
 
-  const update::RecoveryResult rec = update::BlocklistUpdater::recover(fs_, limits_, update::Paths{}, tick_);
+  const update::RecoveryResult rec = update::BlocklistUpdater::recoverWithFallback(
+      listFs_, &fs_ == &listFs_ ? nullptr : &fs_, limits_, update::Paths{}, tick_);
   if (rec.restoredOld) log_.log(LogLevel::kWarn, kTag, "restored previous list after an interrupted update");
   if (rec.haveList) {
+    // A list found only on flash serves until a download lands on the SD card.
+    installFs_ = rec.fromFallback ? &fs_ : &listFs_;
     install(kLivePath, rec.header);
+    installFs_ = &listFs_;
+    if (rec.fromFallback) {
+      log_.log(LogLevel::kInfo, kTag,
+               "no list on the SD card yet: using the flash copy, downloading a new one");
+      scheduler_.requestNow();
+    }
   } else {
     log_.log(LogLevel::kWarn, kTag, "no valid blocklist (%s): blocking only custom rules until the download",
              blocklist::formatErrorName(rec.liveError));
@@ -95,7 +106,7 @@ bool BlocklistManager::install(const char* path, const blocklist::Header& h) {
   if (!mem) {
     // Not enough PSRAM for old + new side by side: bridge through a file-backed index
     // so blocking never stops, free the old list, then load into memory.
-    auto f = fs_.open(path, hal::FileMode::kRead);
+    auto f = installFs_->open(path, hal::FileMode::kRead);
     if (!f) return false;
     holder_.publish(std::unique_ptr<blocklist::IIndex>(new blocklist::FileIndex(std::move(f), h.count)));
     fileBacked_ = true;
@@ -108,7 +119,7 @@ bool BlocklistManager::install(const char* path, const blocklist::Header& h) {
     }
   }
   std::shared_ptr<void> owner(mem, platform::LargeFree());
-  auto f = fs_.open(path, hal::FileMode::kRead);
+  auto f = installFs_->open(path, hal::FileMode::kRead);
   uint8_t* p = static_cast<uint8_t*>(mem);
   size_t got = 0, n;
   while (f && got < size && (n = f->read(p + got, size - got > 4096 ? 4096 : size - got)) > 0) {
@@ -163,6 +174,15 @@ void BlocklistManager::loop() {
 
 update::UpdateReport BlocklistManager::installUpload(const char* path) {
   update::UpdateReport r;
+  if (&listFs_ != &fs_) {
+    // The upload was staged on flash, but the list lives on the SD card: staging a big
+    // list on a 2 MB flash can't work, so point at the URL setting instead.
+    fs_.remove(path);
+    r.status = update::UpdateStatus::kFsError;
+    snprintf(r.detail, sizeof(r.detail), "uploads need the list on flash; use the list URL with the SD card");
+    record(r);
+    return r;
+  }
   {
     platform::LockGuard g(updateMutex_);
     r = updater_.installFile(path);
@@ -316,6 +336,7 @@ BlocklistStatus BlocklistManager::status() {
   s.url = url_;
   s.customBlock = block_.size();
   s.customAllow = allow_.size();
+  s.onSdCard = &listFs_ != &fs_;
   return s;
 }
 

@@ -35,14 +35,18 @@ struct BlocklistStatus {
   String url;
   size_t customBlock = 0;
   size_t customAllow = 0;
+  bool onSdCard = false;  // list files live on the SD card (else on flash)
 };
 
 class BlocklistManager final : public update::IListInstaller {
  public:
   static constexpr size_t kMaxRules = 1000;
 
-  BlocklistManager(hal::IFileSystem& fs, hal::IHttpClient& http, hal::IKeyValueStore& kv,
-                   const hal::IClock& clock, hal::IRandom& random, hal::ILogger& log,
+  // `fs`: flash (custom rules, and the list when `listFs` is the same). `listFs`: where the
+  // list file lives and is updated, e.g. the SD card; a list left on `fs` serves as the
+  // fallback until the first download to `listFs` completes.
+  BlocklistManager(hal::IFileSystem& fs, hal::IFileSystem& listFs, hal::IHttpClient& http,
+                   hal::IKeyValueStore& kv, const hal::IClock& clock, hal::IRandom& random, hal::ILogger& log,
                    blocklist::ProgressFn tick = nullptr);
 
   void begin();  // boot: recover files, load the list and custom rules
@@ -76,6 +80,8 @@ class BlocklistManager final : public update::IListInstaller {
   static bool normalise(const String& in, String& out, bool* allowPrefix = nullptr);
 
   hal::IFileSystem& fs_;
+  hal::IFileSystem& listFs_;
+  hal::IFileSystem* installFs_;  // where install() reads the list from
   hal::IKeyValueStore& kv_;
   const hal::IClock& clock_;
   hal::ILogger& log_;

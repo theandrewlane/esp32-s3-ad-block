@@ -1,7 +1,8 @@
 name: blocklist
 
 # Rebuilds the default blocklist daily and publishes it at a stable URL:
-#   https://github.com/<owner>/<repo>/releases/download/blocklist/blocklist.bin  (format v2)
+#   https://github.com/<owner>/<repo>/releases/download/blocklist/blocklist.bin      (format v2, flash-sized)
+#   https://github.com/<owner>/<repo>/releases/download/blocklist/blocklist-big.bin  (larger, needs the SD card)
 # Devices fetch it daily at 02:00 local time + 0-10 min jitter (ETag: unchanged lists
 # are not re-downloaded).
 on:
@@ -31,6 +32,14 @@ jobs:
         run: |
           set -o pipefail
           python3 tools/build_blocklist.py blocklist.bin 2>&1 | tee build.log
+      - name: Build large blocklist (default sources + Hagezi TIF medium)
+        run: |
+          set -o pipefail
+          python3 tools/build_blocklist.py blocklist-big.bin \
+            https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts \
+            https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate-onlydomains.txt \
+            https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt \
+            2>&1 | tee build-big.log
       - name: Sanity checks
         run: |
           size=$(stat -c%s blocklist.bin)
@@ -39,26 +48,43 @@ jobs:
           test $(( (size - 32 - 4 * 65537) % 4 )) -eq 0            # whole 32-bit entries
           test "$size" -gt $((32 + 4 * 65537 + 4 * 50000))         # >50k entries, catches a silently shrunk list
           test "$size" -lt 1900000                                 # one copy fits the 4 MB board's 2 MB LittleFS
+          big=$(stat -c%s blocklist-big.bin)
+          echo "big size=$big bytes"
+          head -c 4 blocklist-big.bin | grep -q ADBL
+          test $(( (big - 32 - 4 * 65537) % 4 )) -eq 0
+          test "$big" -gt $((32 + 4 * 65537 + 4 * 400000))         # >400k entries: otherwise a source silently shrank
+          test "$big" -lt 4300000                                  # <= ~1M entries, the PSRAM budget (ARCHITECTURE.md 11)
       - name: Publish to the 'blocklist' release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Same list as the published one: keep the asset (and its ETag), so boards skip the
-          # download. Bytes 16-23 hold the build time; count and CRC (8-15) follow from the
-          # payload, which is compared in full, so skip the first 24 bytes.
-          if gh release download blocklist --pattern blocklist.bin --output current.bin &&
-            cmp -s -i 24 blocklist.bin current.bin; then
-            echo "blocklist unchanged, not re-uploading"
-            exit 0
-          fi
+          # An asset whose payload equals the published one is kept (and its ETag), so
+          # boards skip the download. Bytes 16-23 hold the build time; count and CRC (8-15)
+          # follow from the payload, which is compared in full, so skip the first 24 bytes.
+          changed=0
+          for f in blocklist.bin blocklist-big.bin; do
+            if gh release download blocklist --pattern "$f" --output "current-$f" &&
+              cmp -s -i 24 "$f" "current-$f"; then
+              echo "$f unchanged, not re-uploading"
+            else
+              changed=1
+            fi
+          done
+          if [ "$changed" -eq 0 ]; then exit 0; fi
           entries=$(( ($(stat -c%s blocklist.bin) - 32 - 4 * 65537) / 4 ))
-          notes="Auto-built $(date -u +%F): ${entries} entries (StevenBlack base + Hagezi Ultimate).
+          big=$(( ($(stat -c%s blocklist-big.bin) - 32 - 4 * 65537) / 4 ))
+          notes="Auto-built $(date -u +%F).
+          blocklist.bin: ${entries} entries (StevenBlack base + Hagezi Ultimate), fits the board's flash.
+          blocklist-big.bin: ${big} entries (adds Hagezi TIF medium), needs the SD card.
 
           Device setting (Blocklist URL):
-          https://github.com/${GITHUB_REPOSITORY}/releases/download/blocklist/blocklist.bin"
+          https://github.com/${GITHUB_REPOSITORY}/releases/download/blocklist/blocklist.bin
+          https://github.com/${GITHUB_REPOSITORY}/releases/download/blocklist/blocklist-big.bin"
           if gh release view blocklist >/dev/null 2>&1; then
             gh release edit blocklist --title "Daily blocklist" --notes "$notes"
           else
             gh release create blocklist --title "Daily blocklist" --notes "$notes" --latest=false
           fi
-          gh release upload blocklist blocklist.bin --clobber
+          for f in blocklist.bin blocklist-big.bin; do
+            if ! cmp -s -i 24 "$f" "current-$f" 2>/dev/null; then gh release upload blocklist "$f" --clobber; fi
+          done

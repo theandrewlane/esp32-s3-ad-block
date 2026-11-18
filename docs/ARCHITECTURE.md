@@ -489,6 +489,21 @@ stateDiagram-v2
      then switches back. Blocking never stops.
 - Any failure leaves the old list fully active. The dashboard shows the last
   attempt time, result, entry count, list build date and next scheduled run.
+- **List on the SD card** (`sd_list` setting, applied at boot): the 4 MB board's
+  2 MB LittleFS tops out near 410k names, so a larger list (the `blocklist-big.bin`
+  asset, about 690k names / 2.9 MB) lives on the SD card instead. `BlocklistManager`
+  takes two file systems: flash (custom rules, plus a fallback copy of the list) and
+  `listFs` (`SdFileSystem`, or flash again when the setting is off or no FAT card
+  mounts). At boot `BlocklistUpdater::recoverWithFallback` prefers a valid list on
+  `listFs`; otherwise it loads the flash copy and asks for an immediate download to the
+  card. Updates always write to `listFs`; the list is still read into PSRAM, so lookups
+  never touch the card, except in the swap bridge below. At 690k names two copies do not
+  fit in PSRAM, so a swap bridges through the file-backed index on the card for the
+  couple of seconds the new list takes to load (about 2 ms per candidate lookup).
+  Boot validation reads the file from the card a few times (about 1.4 MB/s), so
+  startup takes a few seconds longer than from flash. The card is shared with the
+  block log through `platform::SdCard` (one lock around every SD call). Dashboard file
+  uploads are staged on flash and so only work while the list is on flash.
 
 ---
 
@@ -807,7 +822,7 @@ blocks in one piece each, so watch the largest free block (`heapBlock` in
 
 | Item                                                          | Default                                                                                                                                                                                             |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Blocklist index (one buffer; up to 2 during swap if free)     | 1.9 MB at 400k names; cap 1M names (4.3 MB)                                                                                                                                                         |
+| Blocklist index (one buffer; up to 2 during swap if free)     | 1.9 MB at 400k names, 2.9 MB at the 690k large list; cap 1M names (4.3 MB)                                                                                                                          |
 | Response cache: entry pool (16k × 48 B) + payload arena       | 0.8 MB + 2 MB                                                                                                                                                                                       |
 | Pending-query pool (32 slots × ~4.6 KB: query + reply buffer) | 0.15 MB                                                                                                                                                                                             |
 | Stats, client table (256 clients), custom sets                | < 0.2 MB                                                                                                                                                                                            |

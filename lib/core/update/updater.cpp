@@ -22,8 +22,8 @@ class DownloadSink final : public hal::IHttpBodySink {
   // next to it but would fit alone, the live file is dropped to make room (the loaded
   // copy keeps serving lookups), which roughly doubles the largest list a small flash
   // can take. liveSize 0 disables this.
-  DownloadSink(hal::IFileSystem& fs, const char* path, const blocklist::Limits& limits,
-               const char* livePath, size_t liveSize)
+  DownloadSink(hal::IFileSystem& fs, const char* path, const blocklist::Limits& limits, const char* livePath,
+               size_t liveSize)
       : fs_(fs), path_(path), validator_(limits), livePath_(livePath), liveSize_(liveSize) {}
 
   bool onBodyChunk(const uint8_t* data, size_t len) override {
@@ -289,6 +289,17 @@ RecoveryResult BlocklistUpdater::recover(hal::IFileSystem& fs, const blocklist::
   }
   fs.remove(paths.old);
   return r;
+}
+
+RecoveryResult BlocklistUpdater::recoverWithFallback(hal::IFileSystem& primary, hal::IFileSystem* fallback,
+                                                     const blocklist::Limits& limits, Paths paths,
+                                                     blocklist::ProgressFn tick) {
+  RecoveryResult r = recover(primary, limits, paths, tick);
+  if (r.haveList || !fallback || fallback == &primary) return r;
+  RecoveryResult f = recover(*fallback, limits, paths, tick);
+  if (!f.haveList) return r;  // keep the primary's error for the log
+  f.fromFallback = true;
+  return f;
 }
 
 }  // namespace update

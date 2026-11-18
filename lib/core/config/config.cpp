@@ -153,6 +153,8 @@ SetResult setField(AppConfig& c, const char* key, const char* raw) {
     ok = parseBool(v, c.icloudRelay);
   else if (!strcmp(key, "priv_rev"))
     ok = parseBool(v, c.privateReverse);
+  else if (!strcmp(key, "sd_list"))
+    ok = parseBool(v, c.sdList);
   else if (!strcmp(key, "sd_log"))
     ok = parseBool(v, c.sdLog);
   else if (!strcmp(key, "tz"))
@@ -187,8 +189,8 @@ bool load(const hal::IKeyValueStore& kv, AppConfig& c) {
   const char* textKeys[] = {"up_pri", "up_sec", "up_cip", "up_cip2", "up_cname", "tz"};
   for (const char* k : textKeys)
     if (kv.getString(k, buf, sizeof(buf))) setField(c, k, buf);
-  const char* u32Keys[] = {"up_doh",    "up_plain", "up_cdoh",  "pad",    "ad", "blk_ttl",
-                           "ff_canary", "icloud",   "priv_rev", "sd_log", "log"};
+  const char* u32Keys[] = {"up_doh",    "up_plain", "up_cdoh",  "pad",     "ad",     "blk_ttl",
+                           "ff_canary", "icloud",   "priv_rev", "sd_list", "sd_log", "log"};
   for (const char* k : u32Keys) {
     uint32_t v;
     if (kv.getU32(k, v)) {
@@ -209,8 +211,8 @@ bool save(hal::IKeyValueStore& kv, const AppConfig& c) {
             kv.setU32("up_plain", c.plainFallback) && kv.setU32("up_cdoh", c.customDoh) &&
             kv.setU32("pad", c.padding) && kv.setU32("ad", c.passAd) && kv.setU32("blk_ttl", c.blockedTtl) &&
             kv.setU32("ff_canary", c.firefoxCanary) && kv.setU32("icloud", c.icloudRelay) &&
-            kv.setU32("priv_rev", c.privateReverse) && kv.setU32("sd_log", c.sdLog) &&
-            kv.setU32("log", c.logLevel);
+            kv.setU32("priv_rev", c.privateReverse) && kv.setU32("sd_list", c.sdList) &&
+            kv.setU32("sd_log", c.sdLog) && kv.setU32("log", c.logLevel);
   return ok && kv.setU32("cfg_ver", kSchemaVersion);
 }
 
@@ -220,7 +222,7 @@ bool requiresRestart(const AppConfig& a, const AppConfig& b) {
          strcmp(a.customIp2, b.customIp2) != 0 || strcmp(a.customName, b.customName) != 0 ||
          a.customDoh != b.customDoh || a.padding != b.padding || a.passAd != b.passAd ||
          a.blockedTtl != b.blockedTtl || a.firefoxCanary != b.firefoxCanary ||
-         a.icloudRelay != b.icloudRelay || a.privateReverse != b.privateReverse;
+         a.icloudRelay != b.icloudRelay || a.privateReverse != b.privateReverse || a.sdList != b.sdList;
 }
 
 size_t buildChain(const AppConfig& c, Endpoint* out, size_t max) {

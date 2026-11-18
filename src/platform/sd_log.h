@@ -4,10 +4,10 @@
 //
 // record() is the only call on the DNS path: it never blocks, never allocates and
 // drops the entry when the queue is full. A low-priority writer task does all card
-// I/O, so a slow or missing card can never stall DNS. The card is mounted only while
-// logging is on, and again every 30 s until it appears.
+// I/O, so a slow or missing card can never stall DNS. The card is mounted when logging is on and
+// retried every 30 s until it appears.
 //
-// The SD card uses the second SPI host (HSPI): the display's QSPI owns SPI2.
+// The card itself is owned by SdCard (shared with the blocklist storage).
 
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
@@ -18,6 +18,7 @@
 #include <cstdint>
 
 #include "platform/rtos.h"
+#include "platform/sd_card.h"
 #include "querylog/query_log.h"
 
 namespace platform {
@@ -43,6 +44,8 @@ class SdBlockLog {
     uint32_t bytes;
   };
   static constexpr size_t kMaxDays = querylog::kKeepDays + 2;
+
+  explicit SdBlockLog(SdCard& card) : card_(card) {}
 
   // Creates the queue and the writer task. Call once from setup().
   void begin();
@@ -70,20 +73,17 @@ class SdBlockLog {
 
   static void taskEntry(void* self);
   void run();
-  bool mount();
-  void unmount();
+  bool ensureDir();
   void prune(int32_t today);
   bool append(const Item& it, char* line);
 
+  SdCard& card_;
   QueueHandle_t queue_ = nullptr;
-  Mutex cardLock_;
   std::atomic<bool> enabled_{false};
   std::atomic<State> state_{State::kOff};
   std::atomic<uint32_t> logged_{0};
   std::atomic<uint32_t> dropped_{0};
-  std::atomic<uint64_t> cardBytes_{0};
   std::atomic<uint32_t> lastMountTry_{0};
-  char openDay_[16] = "";  // day whose header is known to be written
 };
 
 }  // namespace platform

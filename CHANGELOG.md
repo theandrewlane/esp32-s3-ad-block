@@ -22,6 +22,11 @@ All notable changes to this project are documented here. The format follows
   (modifiers ignored), `@@||example.com^` (allow) and hosts-file lines
   (`0.0.0.0 example.com`) are accepted in the rule boxes. Allow rules still win.
   The dashboard explains the syntax under _Blocklist & rules_.
+- Large blocklist (about 690k domains, adds Hagezi TIF medium) stored on the SD card:
+  _Blocklist & rules → Use the large list_, or the _Keep the blocklist on the SD card_
+  setting plus the `blocklist-big.bin` URL from the repository's blocklist release. A
+  flash copy keeps blocking until the first download to the card, and serves again if
+  the card is missing at boot. CI now publishes both lists daily.
 - Dashboard Activity tab: the last 80 lookups and the most blocked names, with a one-tap
   Allow or Block, and a "Why was this blocked?" lookup that names the rule (your
   allowlist, your own block rule, or the downloaded list).

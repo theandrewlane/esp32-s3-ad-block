@@ -29,6 +29,8 @@
 #include "platform/nvs_kv_store.h"
 #include "platform/psram.h"
 #include "platform/restart_info.h"
+#include "platform/sd_card.h"
+#include "platform/sd_fs.h"
 #include "platform/sd_log.h"
 #include "platform/serial_logger.h"
 #include "platform/transports.h"
@@ -65,7 +67,9 @@ app::ClientTable gClients;
 app::BlocklistManager* gBlocklist = nullptr;
 app::AppPolicy* gPolicy = nullptr;
 display::DisplayStats gDisplayStats;
-platform::SdBlockLog gSdLog;
+platform::SdCard gSdCard;
+platform::SdFileSystem gSdFs(gSdCard);
+platform::SdBlockLog gSdLog(gSdCard);
 app::DnsService* gDns = nullptr;
 auth::PasswordStore* gPasswords = nullptr;
 auth::LoginGuard gLogins(gClock);
@@ -361,7 +365,16 @@ void setup() {
     Serial.printf("[setup] Dashboard password not set. One-time setup code: %s  (user: %s)\n",
                   gPasswords->setupCode(), gPasswords->user());
 
-  gBlocklist = new app::BlocklistManager(gFs, gHttp, gKv, gClock, gRandom, gLog, feedWatchdog);
+  // The list lives on the SD card when the setting is on and a FAT card is present (a
+  // list left on flash serves until the first download to the card). The choice is
+  // made once, here: inserting a card later takes effect after a reboot.
+  bool listOnSd = false;
+  if (gConfig.sdList) {
+    listOnSd = gSdCard.mount();
+    if (!listOnSd) Serial.println("[WARN] SD list selected but no FAT card found: using flash");
+  }
+  hal::IFileSystem& listFs = listOnSd ? static_cast<hal::IFileSystem&>(gSdFs) : gFs;
+  gBlocklist = new app::BlocklistManager(gFs, listFs, gHttp, gKv, gClock, gRandom, gLog, feedWatchdog);
   gBlocklist->begin();
   gClients.loadBans();
   gSdLog.begin();

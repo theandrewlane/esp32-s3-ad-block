@@ -54,6 +54,14 @@ python3 -m unittest discover -s tools -p 'test_*.py'
   if the release notes' "Auto-built" date stops moving, re-enable the workflow in the
   Actions tab.
 
+## Large list on the SD card
+
+`sd_list` setting (boot-time choice) puts the live/tmp/old list files on the SD card
+(`platform/sd_fs.h`) via `BlocklistManager`'s second `IFileSystem`; flash keeps the
+custom rules and serves as a fallback (`BlocklistUpdater::recoverWithFallback`). CI
+builds `blocklist.bin` (flash-sized) and `blocklist-big.bin` (~690k, <= 4.3 MB). Details
+and the swap-bridge caveat: ARCHITECTURE.md §6. SD calls always hold `SdCard::lock()`.
+
 ## Daily update (maintenance task)
 
 Code: `lib/core/sched/daily_scheduler.*`, `lib/core/update/updater.*`, wired up in

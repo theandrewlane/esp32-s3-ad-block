@@ -104,6 +104,7 @@ static void test_round_trip_through_nvs() {
   config::setField(c, "blk_ttl", "42");
   config::setField(c, "icloud", "1");
   config::setField(c, "sd_log", "1");
+  config::setField(c, "sd_list", "1");
   config::setField(c, "tz", "UTC0");
   TEST_ASSERT_TRUE(config::save(kv, c));
   AppConfig back;
@@ -112,12 +113,17 @@ static void test_round_trip_through_nvs() {
   TEST_ASSERT_EQUAL_UINT32(42, back.blockedTtl);
   TEST_ASSERT_TRUE(back.icloudRelay);
   TEST_ASSERT_TRUE(back.sdLog);
-  TEST_ASSERT_FALSE(AppConfig{}.sdLog);  // logging who browsed what is opt-in
+  TEST_ASSERT_TRUE(back.sdList);
+  TEST_ASSERT_FALSE(AppConfig{}.sdList);  // the SD card is opt-in for the list too
+  TEST_ASSERT_FALSE(AppConfig{}.sdLog);   // logging who browsed what is opt-in
   TEST_ASSERT_EQUAL_STRING("UTC0", back.timezone);
   TEST_ASSERT_FALSE(config::requiresRestart(c, back));
   AppConfig toggled = c;
   toggled.sdLog = !toggled.sdLog;
   TEST_ASSERT_FALSE(config::requiresRestart(c, toggled));  // applies live
+  AppConfig moved = c;
+  moved.sdList = !moved.sdList;
+  TEST_ASSERT_TRUE(config::requiresRestart(c, moved));  // the list storage is chosen at boot
 }
 
 static void test_load_handles_empty_future_and_corrupt_stores() {

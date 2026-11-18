@@ -465,7 +465,7 @@ void Dashboard::handleStats() {
   j += "],\"blocklist\":{\"entries\":" + String(bl.entries) + ",\"inMemory\":" + b(bl.inMemory) +
        ",\"built\":" + q(formatTime(bl.buildTime)) + ",\"lastAttempt\":" + q(formatTime(bl.lastAttempt)) +
        ",\"lastOk\":" + b(bl.lastOk) + ",\"lastResult\":" + q(bl.lastResult) + ",\"url\":" + q(bl.url) +
-       ",\"time\":" + q(hhmm) + "}";
+       ",\"time\":" + q(hhmm) + ",\"storage\":" + q(bl.onSdCard ? "sd" : "flash") + "}";
   j += ",\"rules\":{\"block\":[";
   const auto block = ctx_.blocklist->rules(false);
   for (size_t i = 0; i < block.size(); i++) j += (i ? "," : "") + q(block[i]);
@@ -495,7 +495,7 @@ void Dashboard::handleGetConfig() {
        ",\"up_cname\":" + q(c.customName) + ",\"up_cdoh\":" + b(c.customDoh);
   j += ",\"pad\":" + String(b(c.padding)) + ",\"ad\":" + b(c.passAd) + ",\"blk_ttl\":" + String(c.blockedTtl);
   j += ",\"ff_canary\":" + String(b(c.firefoxCanary)) + ",\"icloud\":" + b(c.icloudRelay) +
-       ",\"priv_rev\":" + b(c.privateReverse) + ",\"sd_log\":" + b(c.sdLog);
+       ",\"priv_rev\":" + b(c.privateReverse) + ",\"sd_log\":" + b(c.sdLog) + ",\"sd_list\":" + b(c.sdList);
   j += ",\"tz\":" + q(c.timezone) + ",\"log\":" + String(c.logLevel) + "}";
   ctx_.server->send(200, "application/json", j);
 }

@@ -140,6 +140,7 @@ details summary{cursor:pointer;color:var(--accent);font-size:12.5px;margin-top:8
 <div class=row><label class=fld style="flex:0 1 120px">Daily update at<input id=blTime placeholder=02:00 inputmode=numeric></label><span class=hint style="flex:1 1 140px;align-self:flex-end">device time zone</span></div>
 <div class=row><button id=blSave>Save</button><button id=blNow>Update now</button></div>
 <div class=row><input type=file id=blFile accept=.bin aria-label="Blocklist file"><button id=blUpload>Upload list</button></div>
+<div class=row id=bigRow hidden><button id=blBig></button><span class=hint id=bigHint style="flex:1 1 200px"></span></div>
 <div class=hint>Format v2 lists from <code>tools/build_blocklist.py</code>. A bad download or upload never replaces the current list.</div></div>
 <div class=card><h3>Custom block</h3><form class=row data-add=block><input id=addBlock placeholder="ads.example.com or *.tracker.net" aria-label="Domain or pattern to block" autocapitalize=off spellcheck=false><button>Block</button></form><div class=chips id=ruleBlock></div>
 <div class=hint>Blocks the domain and its subdomains.</div>
@@ -171,6 +172,7 @@ details summary{cursor:pointer;color:var(--accent);font-size:12.5px;margin-top:8
 <label class=chk><input type=checkbox name=ff_canary><span>Stop Firefox bypassing via its own DoH</span></label>
 <label class=chk><input type=checkbox name=icloud><span>Disable iCloud Private Relay on this network</span></label>
 <label class=chk><input type=checkbox name=priv_rev><span>Answer private reverse lookups locally</span></label>
+<label class=chk><input type=checkbox name=sd_list><span>Keep the blocklist on the SD card<small>Room for the large list. Needs a FAT32 card; applied after a restart. Falls back to flash if the card is missing.</small></span></label>
 <label class=chk><input type=checkbox name=sd_log><span>Log blocked lookups to the SD card<small>Needs a FAT32 card. Saves time, device and domain of each blocked lookup, 30 days. Off by default.</small></span></label>
 <div class=row><label class=fld style="flex:0 1 130px">Blocked answer TTL (s)<input name=blk_ttl inputmode=numeric></label><label class=fld>Time zone<input name=tz placeholder=UTC0 title="POSIX TZ string: UTC0, or e.g. &lt;+03&gt;-3 for UTC+3 and &lt;-05&gt;5 for UTC-5 (the sign is inverted)"></label><label class=fld style="flex:0 1 110px">Log level<select name=log><option value=0>error<option value=1>warn<option value=2>info<option value=3>debug</select></label></div>
 <div class=hint>Time zone is a POSIX TZ string: <code>UTC0</code>, <code>&lt;+03&gt;-3</code> for UTC+3, <code>&lt;-05&gt;5</code> for UTC−5 (the sign is inverted).</div></fieldset>
@@ -330,8 +332,11 @@ function render(s){const d=s.dns,bl=s.blocklist;
  $('ups2').tBodies[0].replaceChildren(...idle.map(u=>{const tr=el('tr'),td=el('td');td.append(stateBadge(u.state));tr.append(el('td',u.name,'mono'),el('td',transport(u.name,u.encrypted)),td);return tr}));
  // Blocklist
  const st=el('div',undefined,'badge is-'+(bl.lastOk?'good':'warn'));st.append(el('i',undefined,'dot'),'Last update '+bl.lastAttempt+': '+bl.lastResult);
- const dl=el('dl',undefined,'kv');for(const [k,v] of [['Domains',fmt(bl.entries)+(bl.inMemory?' (in PSRAM)':' (from flash)')],['Built',bl.built],['Next update','daily at '+bl.time]])dl.append(el('dt',k),el('dd',v));
+ const dl=el('dl',undefined,'kv');for(const [k,v] of [['Domains',fmt(bl.entries)+(bl.inMemory?' (in PSRAM)':' (from flash)')],['Built',bl.built],['Stored on',bl.storage==='sd'?'SD card':'flash'],['Next update','daily at '+bl.time]])dl.append(el('dt',k),el('dd',v));
  $('blInfo').replaceChildren(dl,el('div',undefined,'row'));$('blInfo').lastChild.append(st);
+ const isBig=/blocklist-big\.bin$/.test(bl.url);$('bigRow').hidden=!(isBig||/\/blocklist\.bin$/.test(bl.url));
+ $('blBig').textContent=isBig?'Back to the standard list':'Use the large list';
+ $('bigHint').textContent=isBig?'About 690k domains, kept on the SD card.':'About 690k domains instead of 360k (adds threat feeds). Needs a FAT32 SD card; the device restarts.';
  if(document.activeElement!==$('blUrl'))$('blUrl').value=bl.url;if(document.activeElement!==$('blTime'))$('blTime').value=bl.time;
  for(const [list,id] of [['block','ruleBlock'],['allow','ruleAllow']]){const items=s.rules[list];
   $(id).replaceChildren(...(items.length?items.map(dm=>{const c=el('span',undefined,'chip'),b=el('button','×');b.title='Remove '+dm;b.setAttribute('aria-label','Remove '+dm);b.onclick=()=>api('/api/rules/remove',{list,d:dm});c.append(el('span',dm,'mono'),b);return c}):[el('span','No rules yet','hint')]))}
@@ -366,6 +371,11 @@ $('resume').onclick=()=>api('/api/blocking/resume');
 document.querySelectorAll('form[data-add]').forEach(f=>f.onsubmit=async e=>{e.preventDefault();const list=f.dataset.add,i=f.querySelector('input');if(i.value.trim()&&await api('/api/rules/add',{list,d:i.value.trim()}))i.value=''});
 $('blSave').onclick=()=>api('/api/blocklist/settings',{u:$('blUrl').value.trim(),t:$('blTime').value.trim()});
 $('blNow').onclick=()=>api('/api/blocklist/update');
+$('blBig').onclick=async()=>{const toBig=!/blocklist-big\.bin$/.test(last.blocklist.url);
+ if(!confirm(toBig?'Switch to the large list? It is stored on the SD card, so insert a FAT32 card first. The device restarts and downloads it.':'Go back to the standard list?'))return;
+ const u=last.blocklist.url.replace(toBig?/blocklist\.bin$/:/blocklist-big\.bin$/,toBig?'blocklist-big.bin':'blocklist.bin');
+ if(!await api('/api/blocklist/settings',{u}))return;
+ await api('/api/blocklist/update');await api('/api/config',{sd_list:toBig?'1':'0'})};
 function upload(path,input){const f=$(input).files[0];if(!f)return toast('choose a file first',true);const fd=new FormData();fd.append('f',f);toast('uploading '+(f.size/1048576).toFixed(2)+' MB...');api(path,null,fd)}
 $('blUpload').onclick=()=>upload('/api/blocklist/upload','blFile');
 

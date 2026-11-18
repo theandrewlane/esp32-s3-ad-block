@@ -253,6 +253,14 @@ repository's CI and published at
 `https://github.com/theandrewlane/esp32-s3-ad-block/releases/download/blocklist/blocklist.bin`.
 If the sources didn't change, the file isn't re-uploaded and boards skip the download.
 
+**Large list (about 690k domains).** `blocklist-big.bin` in the same release adds Hagezi's
+threat-intelligence feed (malware, phishing). It is too big for the board's flash, so it
+needs a FAT32 SD card: on the dashboard use _Blocklist & rules → Use the large list_ (or
+turn on _Settings → Keep the blocklist on the SD card_ and set the list URL to
+`.../releases/download/blocklist/blocklist-big.bin`). The device restarts, keeps blocking
+with its flash copy, and downloads the large list to the card. Without a card it stays on
+the standard list.
+
 Design details, memory budget and threading: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Configuration

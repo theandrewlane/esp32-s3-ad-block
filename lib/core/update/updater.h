@@ -67,6 +67,7 @@ class IListInstaller {
 struct RecoveryResult {
   bool haveList = false;
   bool restoredOld = false;
+  bool fromFallback = false;  // recoverWithFallback(): the list was found on the fallback fs
   blocklist::Header header;
   blocklist::FormatError liveError = blocklist::FormatError::kNone;
 };
@@ -91,6 +92,14 @@ class BlocklistUpdater {
   // interrupted swap. Deletes stale temp files.
   static RecoveryResult recover(hal::IFileSystem& fs, const blocklist::Limits& limits, Paths paths = Paths{},
                                 blocklist::ProgressFn tick = nullptr);
+
+  // Boot with the list on `primary` (the SD card) and an older copy on `fallback`
+  // (flash): a usable primary list wins, otherwise a usable fallback list is returned
+  // with fromFallback set, so the caller loads it from there and downloads a fresh one.
+  // Either file system's stale temp/old files are cleaned up.
+  static RecoveryResult recoverWithFallback(hal::IFileSystem& primary, hal::IFileSystem* fallback,
+                                            const blocklist::Limits& limits, Paths paths = Paths{},
+                                            blocklist::ProgressFn tick = nullptr);
 
  private:
   UpdateReport fail(UpdateStatus s, const char* detail, int http = 0);

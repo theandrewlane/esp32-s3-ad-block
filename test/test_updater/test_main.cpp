@@ -291,8 +291,41 @@ static void test_boot_recovery_paths() {
   TEST_ASSERT_EQUAL_STRING("size does not match entry count", blocklist::formatErrorName(r.liveError));
 }
 
+static void test_recovery_prefers_primary_and_falls_back() {
+  MemFileSystem flash;
+  // Primary (SD) has a list: it wins, the flash copy is not touched.
+  fs->put("/blocklist.bin", newList);
+  flash.put("/blocklist.bin", oldList);
+  auto r = BlocklistUpdater::recoverWithFallback(*fs, &flash, limits());
+  TEST_ASSERT_TRUE(r.haveList);
+  TEST_ASSERT_FALSE(r.fromFallback);
+  TEST_ASSERT_TRUE(*flash.get("/blocklist.bin") == oldList);
+  // Primary empty (new or blank card): the flash copy serves until a download lands.
+  fs->remove("/blocklist.bin");
+  r = BlocklistUpdater::recoverWithFallback(*fs, &flash, limits());
+  TEST_ASSERT_TRUE(r.haveList);
+  TEST_ASSERT_TRUE(r.fromFallback);
+  // Primary corrupt, fallback fine: still the fallback.
+  Bytes half(newList.begin(), newList.begin() + newList.size() / 2);
+  fs->put("/blocklist.bin", half);
+  r = BlocklistUpdater::recoverWithFallback(*fs, &flash, limits());
+  TEST_ASSERT_TRUE(r.fromFallback);
+  // Neither usable: no list, and the primary's error is the one reported.
+  flash.remove("/blocklist.bin");
+  r = BlocklistUpdater::recoverWithFallback(*fs, &flash, limits());
+  TEST_ASSERT_FALSE(r.haveList);
+  TEST_ASSERT_FALSE(r.fromFallback);
+  TEST_ASSERT_EQUAL_STRING("size does not match entry count", blocklist::formatErrorName(r.liveError));
+  // No fallback (flash-only boards) or the same fs twice behaves like recover().
+  r = BlocklistUpdater::recoverWithFallback(*fs, nullptr, limits());
+  TEST_ASSERT_FALSE(r.haveList);
+  r = BlocklistUpdater::recoverWithFallback(*fs, fs, limits());
+  TEST_ASSERT_FALSE(r.haveList);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_recovery_prefers_primary_and_falls_back);
   RUN_TEST(test_successful_update_swaps_file_installs_and_stores_etag);
   RUN_TEST(test_sends_if_none_match_and_handles_304);
   RUN_TEST(test_no_if_none_match_when_live_list_is_missing);
@@ -301,9 +334,9 @@ int main(int, char**) {
   RUN_TEST(test_wrong_file_type_is_rejected_early);
   RUN_TEST(test_network_and_http_errors_keep_old_list);
   RUN_TEST(test_list_too_big_for_flash_is_refused);
-RUN_TEST(test_tight_flash_drops_live_file_to_fit_the_new_list);
-RUN_TEST(test_tight_flash_failed_download_is_reported_and_retryable);
-RUN_TEST(test_roomy_flash_keeps_live_file_until_swap);
+  RUN_TEST(test_tight_flash_drops_live_file_to_fit_the_new_list);
+  RUN_TEST(test_tight_flash_failed_download_is_reported_and_retryable);
+  RUN_TEST(test_roomy_flash_keeps_live_file_until_swap);
   RUN_TEST(test_identical_content_without_etag_support_is_unchanged);
   RUN_TEST(test_rename_failure_restores_old_list_and_reloads_it);
   RUN_TEST(test_install_failure_is_reported);

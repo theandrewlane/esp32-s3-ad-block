@@ -2,7 +2,6 @@
 
 #include <FS.h>
 #include <SD.h>
-#include <SPI.h>
 
 #include <cstring>
 #include <ctime>
@@ -11,14 +10,10 @@ namespace platform {
 
 namespace {
 
-constexpr int kPinCs = 10, kPinMosi = 11, kPinClk = 12, kPinMiso = 13;
-constexpr uint32_t kSpiHz = 20000000;
 constexpr size_t kQueueLen = 48;
 constexpr uint32_t kRemountMs = 30000;
 constexpr uint32_t kBatchMs = 2000;
 constexpr time_t kMinSaneEpoch = 1700000000;  // before this the clock has not synced
-
-SPIClass sSpi(HSPI);
 
 util::CivilTime civil(time_t t) {
   struct tm tmv;
@@ -67,7 +62,7 @@ SdBlockLog::Status SdBlockLog::status() const {
   s.state = state_;
   s.logged = logged_;
   s.dropped = dropped_;
-  if (s.state == State::kReady) s.totalBytes = cardBytes_;
+  if (s.state == State::kReady) s.totalBytes = card_.totalBytes();
   return s;
 }
 
@@ -75,21 +70,10 @@ void SdBlockLog::taskEntry(void* self) {
   static_cast<SdBlockLog*>(self)->run();
 }
 
-bool SdBlockLog::mount() {
-  sSpi.begin(kPinClk, kPinMiso, kPinMosi, kPinCs);
-  if (!SD.begin(kPinCs, sSpi, kSpiHz, "/sd", 5, false)) {
-    sSpi.end();
-    return false;
-  }
+bool SdBlockLog::ensureDir() {
+  LockGuard lock(card_.lock());
   if (!SD.exists(querylog::kDir)) SD.mkdir(querylog::kDir);
-  cardBytes_ = SD.totalBytes();
   return SD.exists(querylog::kDir);
-}
-
-void SdBlockLog::unmount() {
-  SD.end();
-  sSpi.end();
-  openDay_[0] = '\0';
 }
 
 void SdBlockLog::prune(int32_t today) {
@@ -140,11 +124,7 @@ void SdBlockLog::run() {
       Item discard;
       while (xQueueReceive(queue_, &discard, 0) == pdTRUE) {
       }
-      if (state_ != State::kOff) {
-        LockGuard lock(cardLock_);
-        unmount();
-        state_ = State::kOff;
-      }
+      state_ = State::kOff;  // the card stays mounted: the blocklist may live on it
       continue;
     }
     if (state_ != State::kReady) {
@@ -155,9 +135,8 @@ void SdBlockLog::run() {
         continue;
       }
       lastMountTry_ = now ? now : 1;
-      LockGuard lock(cardLock_);
-      if (state_ == State::kError) unmount();
-      state_ = mount() ? State::kReady : State::kNoCard;
+      if (state_ == State::kError) card_.unmount();
+      state_ = card_.mount() && ensureDir() ? State::kReady : State::kNoCard;
       if (state_ == State::kReady) prunedDay = -1;
       if (state_ != State::kReady) continue;
     }
@@ -168,7 +147,7 @@ void SdBlockLog::run() {
         dropped_++;
         continue;
       }
-      LockGuard lock(cardLock_);
+      LockGuard lock(card_.lock());
       if (!append(it, line)) {
         failed = true;
         dropped_++;
@@ -190,7 +169,7 @@ void SdBlockLog::run() {
 
 bool SdBlockLog::listDays(DayFile* out, size_t cap, size_t* count) {
   *count = 0;
-  LockGuard lock(cardLock_);
+  LockGuard lock(card_.lock());
   if (state_ != State::kReady) return false;
   File dir = SD.open(querylog::kDir);
   if (!dir) return false;
@@ -211,7 +190,7 @@ bool SdBlockLog::readDay(const char* name, uint32_t offset, uint8_t* buf, size_t
   if (!querylog::parseDayFileName(name, nullptr) || strchr(name, '/')) return false;  // no path tricks
   char path[40];
   snprintf(path, sizeof(path), "%s/%s", querylog::kDir, name);
-  LockGuard lock(cardLock_);
+  LockGuard lock(card_.lock());
   if (state_ != State::kReady) return false;
   File f = SD.open(path, FILE_READ);
   if (!f) return false;
@@ -225,7 +204,7 @@ bool SdBlockLog::clearAll() {
   DayFile days[kMaxDays];
   size_t n = 0;
   if (!listDays(days, kMaxDays, &n)) return false;
-  LockGuard lock(cardLock_);
+  LockGuard lock(card_.lock());
   if (state_ != State::kReady) return false;
   bool ok = true;
   for (size_t i = 0; i < n; i++) {
